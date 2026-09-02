@@ -4,7 +4,7 @@
 <div class="public-shell">
 <div class="public-card public-card--narrow">
   <div style="display:flex;align-items:baseline;gap:12px">
-    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.svg' %}" alt="Irritec" style="height:30px">
+    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.png' %}" alt="Irritec" style="height:30px">
     <span class="text-muted" style="font-size:12px">{{ pr.display_ref }}</span>
   </div>
 
@@ -14,9 +14,9 @@
   {% elif pr.status == 'quoting' %}
     <h3 style="margin:14px 0 4px">Obteniendo cotizaciones</h3>
     <p class="text-muted" style="font-size:14px">Compras está solicitando cotizaciones a proveedores.</p>
-  {% elif pr.status == 'quotes_in' %}
-    <h3 style="margin:14px 0 4px">Tus cotizaciones ya están</h3>
-    <p class="text-muted" style="font-size:14px">Compras tiene {{ pr.quotes.count }} {% if pr.quotes.count == 1 %}cotización{% else %}cotizaciones{% endif %}. Se espera una orden de compra pronto.</p>
+  {% elif pr.status == 'awaiting_confirmation' %}
+    <h3 style="margin:14px 0 4px">Cotizaciones recibidas</h3>
+    <p class="text-muted" style="font-size:14px">Te compartimos {{ pr.quotes.count }} {% if pr.quotes.count == 1 %}cotización{% else %}cotizaciones{% endif %} por correo — revísalas abajo y respóndenos para confirmar cuál prefieres. Emitimos la orden de compra en cuanto tengamos tu confirmación.</p>
   {% elif pr.status == 'po_issued' %}
     <h3 style="margin:14px 0 4px">Orden de compra emitida</h3>
     <p class="text-muted" style="font-size:14px">{{ pr.po_number }} fue emitida con {{ pr.selected_quote.supplier_name }}.</p>
@@ -42,12 +42,41 @@
     {% endfor %}
   </div>
 
+  {% if pr.quotes.exists and pr.status != 'requested' and pr.status != 'quoting' %}
+  <div class="card" style="margin-bottom:var(--space-3)">
+    <span class="card-kicker">Cotizaciones recibidas</span>
+    <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:13px">
+      {% for quote in pr.quotes.all %}
+      <div style="{% if not forloop.first %}border-top:1px solid var(--color-divider);padding-top:var(--space-2){% endif %}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <strong>{{ quote.supplier_name }}</strong>
+          {% if quote.selected %}<span class="tag" style="background:var(--color-accent);color:#fff">Confirmada</span>{% endif %}
+        </div>
+        <div class="text-muted" style="font-size:12px">
+          {% if quote.total_amount %}{{ quote.currency }} {{ quote.total_amount|floatformat:0 }} · {% endif %}
+          {% if quote.lead_time_days %}entrega en {{ quote.lead_time_days }} días · {% endif %}
+          {% if quote.quote_pdf %}<a href="{{ quote.quote_pdf.url }}" target="_blank" rel="noopener">Ver PDF</a>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="card">
     <span class="card-kicker">Tus artículos</span>
-    <div style="font-size:14px">
-      {% for item in pr.items.all %}{{ item.quantity|floatformat:"0" }} × {{ item.description }}<br>{% endfor %}
+    <div style="font-size:14px;display:flex;flex-direction:column;gap:6px">
+      {% for item in pr.items.all %}
+      <div style="display:flex;align-items:center;gap:8px">
+        {% if item.reference_image %}<img src="{{ item.reference_image.url }}" alt="Foto de {{ item.description }}" style="width:28px;height:28px;object-fit:cover;border-radius:var(--radius-sm);flex:none">{% endif %}
+        <span>{{ item.quantity }} × {{ item.description }}</span>
+      </div>
+      {% endfor %}
     </div>
     <div class="card-meta">Se necesita antes del {{ pr.needed_by|date:"d M" }} · {{ pr.get_urgency_display }}</div>
+    {% if pr.reference_image %}
+    <img src="{{ pr.reference_image.url }}" alt="Tu imagen de referencia" style="max-width:100%;border-radius:var(--radius-md);margin-top:var(--space-3)">
+    {% endif %}
   </div>
 </div>
 </div>

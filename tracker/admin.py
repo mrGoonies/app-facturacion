@@ -30,7 +30,7 @@ class PickingListInline(admin.TabularInline):
 
 @admin.register(PickingListBatch)
 class PickingListBatchAdmin(admin.ModelAdmin):
-    list_display = ["shipped_on", "sent_by", "customer_route", "created_at"]
+    list_display = ["shipped_on", "created_at"]
     inlines = [PickingListInline]
 
 

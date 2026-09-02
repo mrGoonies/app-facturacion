@@ -11,14 +11,26 @@
     <div class="text-muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em">Tiempo a OC</div>
     <div style="font-family:var(--font-heading);font-size:28px;line-height:1.1">{{ pr.time_to_po|hm }}</div>
     <div class="text-muted" style="font-size:12px">de meta {{ pr.po_target_hours }} h</div>
+    {% if pr.is_open %}
+    <form method="post" style="margin-top:var(--space-2)" onsubmit="return confirm('¿Cancelar esta solicitud de compra?');">
+      {% csrf_token %}<input type="hidden" name="action" value="cancel_request">
+      <button class="btn btn-ghost" style="font-size:12px;padding:4px 2px" type="submit">Cancelar solicitud</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 
+{% if pr.status == 'cancelled' %}
+<div style="margin:var(--space-6) 0">
+  <span class="tag" style="background:var(--color-alert);color:#fff;font-size:12px;padding:6px 14px">Solicitud cancelada{% if pr.closed_at %} · {{ pr.closed_at|date:"d M H:i" }}{% endif %}</span>
+</div>
+{% else %}
 <div class="stepper" style="margin:var(--space-6) 0">
   {% for step in pr.status_steps %}
-  <span class="stepper-seg stepper-seg--{{ step.state }}">{{ step.label }}{% if step.state == 'current' and step.key == 'quotes_in' %} · elige una{% endif %}</span>
+  <span class="stepper-seg stepper-seg--{{ step.state }}">{{ step.label }}{% if step.state == 'current' and step.key == 'awaiting_confirmation' %} · esperando respuesta{% endif %}</span>
   {% endfor %}
 </div>
+{% endif %}
 
 <div style="display:grid;grid-template-columns:1fr 320px;gap:var(--space-8)">
   <div>
@@ -30,7 +42,7 @@
           <span class="card-title">{{ quote.supplier_name }}</span>
           {% if quote.selected %}
             <span class="tag" style="background:var(--color-accent);color:#fff">Seleccionada</span>
-          {% elif pr.status == 'quotes_in' or pr.status == 'quoting' %}
+          {% elif pr.status == 'quoting' or pr.status == 'awaiting_confirmation' %}
             <form method="post" style="margin:0">
               {% csrf_token %}
               <input type="hidden" name="action" value="select_quote">
@@ -39,9 +51,10 @@
             </form>
           {% endif %}
         </div>
-        <div style="display:flex;gap:var(--space-8);font-size:13px">
-          <div><div class="text-muted" style="font-size:11px">Total</div>{{ quote.currency }} {{ quote.total_amount|floatformat:0|intcomma }}</div>
-          <div><div class="text-muted" style="font-size:11px">Tiempo de entrega</div>{{ quote.lead_time_days }} días</div>
+        <div style="display:flex;gap:var(--space-8);font-size:13px;flex-wrap:wrap">
+          <div><div class="text-muted" style="font-size:11px">Documento</div>{% if quote.quote_pdf %}<a href="{{ quote.quote_pdf.url }}" target="_blank" rel="noopener">Ver PDF</a>{% else %}<span class="text-muted">—</span>{% endif %}</div>
+          <div><div class="text-muted" style="font-size:11px">Total</div>{% if quote.total_amount %}{{ quote.currency }} {{ quote.total_amount|floatformat:0|intcomma }}{% else %}<span class="text-muted">—</span>{% endif %}</div>
+          <div><div class="text-muted" style="font-size:11px">Tiempo de entrega</div>{% if quote.lead_time_days %}{{ quote.lead_time_days }} días{% else %}<span class="text-muted">—</span>{% endif %}</div>
           <div><div class="text-muted" style="font-size:11px">Pago</div>{{ quote.payment_terms|default:"—" }}</div>
           <div><div class="text-muted" style="font-size:11px">Cotización recibida</div>{{ quote.received_at|date:"d M H:i" }}</div>
         </div>
@@ -53,48 +66,69 @@
 
     {% if pr.status == 'requested' or pr.status == 'quoting' %}
     <h5 style="margin-top:var(--space-6)">Agregar una cotización</h5>
-    <form method="post" class="card" style="gap:var(--space-3)">
+    <form method="post" enctype="multipart/form-data" class="card" style="gap:var(--space-3)">
       {% csrf_token %}
       <input type="hidden" name="action" value="add_quote">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)">
         <div class="field"><label>Proveedor</label>{{ quote_form.supplier_name }}</div>
-        <div class="field"><label>Total</label>{{ quote_form.total_amount }}</div>
+        <div class="field"><label>PDF de la cotización</label>{{ quote_form.quote_pdf }}</div>
+        <div class="field"><label>Total (opcional)</label>{{ quote_form.total_amount }}</div>
         <div class="field"><label>Moneda</label>{{ quote_form.currency }}</div>
-        <div class="field"><label>Tiempo de entrega (días)</label>{{ quote_form.lead_time_days }}</div>
-        <div class="field" style="grid-column:1/-1"><label>Condiciones de pago</label>{{ quote_form.payment_terms }}</div>
+        <div class="field"><label>Tiempo de entrega en días (opcional)</label>{{ quote_form.lead_time_days }}</div>
+        <div class="field" style="grid-column:1/-1"><label>Condiciones de pago (opcional)</label>{{ quote_form.payment_terms }}</div>
       </div>
       <button class="btn btn-secondary btn-block" type="submit">Agregar cotización</button>
     </form>
-    {% if pr.status == 'requested' %}
-    <form method="post" style="margin-top:var(--space-2)">
+    {% if pr.status == 'quoting' and pr.quotes.exists %}
+    <form method="post" style="margin-top:var(--space-3)">
       {% csrf_token %}
-      <input type="hidden" name="action" value="request_quotes">
-      <button class="btn btn-ghost" type="submit">Marcar cotizaciones como solicitadas a proveedores</button>
+      <input type="hidden" name="action" value="send_quotes_to_requester">
+      <button class="btn btn-primary btn-block" type="submit">Enviar cotizaciones a {{ pr.requester_name }} para confirmar</button>
     </form>
+    <p class="text-muted" style="font-size:12px;margin-top:4px">Le llegará un correo con proveedor, total y el PDF de cada cotización. Cuando confirme cuál prefiere, selecciónala arriba para poder emitir la OC.</p>
     {% endif %}
+    {% endif %}
+
+    {% if pr.reference_image %}
+    <h5 style="margin-top:var(--space-6)">Imagen de referencia</h5>
+    <a href="{{ pr.reference_image.url }}" target="_blank" rel="noopener">
+      <img src="{{ pr.reference_image.url }}" alt="Referencia de {{ pr.display_ref }}" style="max-width:240px;border-radius:var(--radius-md);display:block">
+    </a>
     {% endif %}
 
     <h5 style="margin-top:var(--space-6)">Artículos solicitados</h5>
     <div class="table-scroll">
     <table class="table">
-      <thead><tr><th>Descripción</th><th style="width:70px">Cant.</th><th style="width:110px">Unidad</th></tr></thead>
+      <thead><tr><th>Descripción</th><th style="width:70px">Cant.</th><th style="width:110px">Unidad</th><th style="width:60px">Foto</th></tr></thead>
       <tbody>
       {% for item in pr.items.all %}
-        <tr><td>{{ item.description }}</td><td>{{ item.quantity|floatformat:"-2" }}</td><td>{{ item.unit }}</td></tr>
+        <tr>
+          <td>{{ item.description }}</td>
+          <td>{{ item.quantity }}</td>
+          <td>{{ item.unit }}</td>
+          <td>{% if item.reference_image %}<a href="{{ item.reference_image.url }}" target="_blank" rel="noopener"><img src="{{ item.reference_image.url }}" alt="Referencia de {{ item.description }}" style="width:40px;height:40px;object-fit:cover;border-radius:var(--radius-sm)"></a>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        </tr>
       {% endfor %}
       </tbody>
     </table>
     </div>
 
-    {% if pr.selected_quote and pr.status != 'po_issued' and pr.status != 'closed' %}
+    {% if pr.selected_quote and pr.status == 'awaiting_confirmation' %}
     <div style="display:flex;gap:var(--space-3);margin-top:var(--space-6);align-items:center">
       <form method="post"><input type="hidden" name="action" value="issue_po">{% csrf_token %}
         <button class="btn btn-primary" style="padding:12px 28px" type="submit">Emitir orden de compra</button>
       </form>
       <span class="text-muted" style="font-size:12px">{{ pr.requester_name }} será notificado automáticamente.</span>
     </div>
+    {% elif pr.status == 'awaiting_confirmation' %}
+    <p class="card-body" style="margin-top:var(--space-6)">Cotizaciones enviadas el {{ pr.quotes_sent_at|date:"d M H:i" }} — esperando que {{ pr.requester_name }} confirme cuál prefiere. Cuando lo haga, selecciona esa cotización arriba para poder emitir la OC.</p>
     {% elif pr.status == 'po_issued' %}
     <p class="card-body" style="margin-top:var(--space-4)"><strong>{{ pr.po_number }}</strong> emitida el {{ pr.po_issued_at|date:"d M H:i" }}.</p>
+    <form method="post" style="margin-top:var(--space-3)">{% csrf_token %}<input type="hidden" name="action" value="close_request">
+      <button class="btn btn-primary" style="padding:11px 26px" type="submit">Cerrar solicitud</button>
+    </form>
+    {% elif pr.status == 'closed' %}
+    <p class="card-body" style="margin-top:var(--space-4)">Solicitud cerrada el {{ pr.closed_at|date:"d M H:i" }}.</p>
     {% endif %}
   </div>
 

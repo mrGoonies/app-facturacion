@@ -5,7 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "cloudinary>=1.46.2",
+    "dj-database-url>=3.1.2",
     "django>=6.1",
+    "django-anymail>=15.1",
+    "django-cloudinary-storage>=0.3.0",
+    "gunicorn>=26.2.0",
     "psycopg[binary]>=3.3.5",
     "python-decouple>=3.8",
+    "whitenoise>=6.12.0",
 ]

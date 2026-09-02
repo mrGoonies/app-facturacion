@@ -157,7 +157,7 @@ textarea.input{min-height:90px;resize:vertical;border-radius:var(--radius-lg)}
 
 /* — form layout (was inline styles; needs classes so it can respond) — */
 .form-row-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)}
-.item-row{display:grid;grid-template-columns:1fr 88px 120px auto;gap:var(--space-2);align-items:end;
+.item-row{display:grid;grid-template-columns:1fr 88px 120px 180px auto;gap:var(--space-2);align-items:end;
   background:var(--color-surface);padding:var(--space-3);border-radius:var(--radius-lg)}
 .choice-row{display:flex;flex-wrap:wrap;gap:var(--space-4)}
 .submit-row{display:flex;align-items:center;gap:var(--space-4)}
@@ -192,6 +192,33 @@ textarea.input{min-height:90px;resize:vertical;border-radius:var(--radius-lg)}
 .gauge-scale .gauge-scale-mark{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
 
 .table-scroll{overflow-x:auto}
+
+/* — picking list number capture —
+   A tag-input for logistics' one repetitive task: log a stack of PL numbers
+   fast, often typed one-handed on a phone at the loading dock. Chips borrow
+   the .tag color language (accent-100 fill, accent-800 ink) so they read as
+   the same "tag" vocabulary as the rest of the app, but sized for a thumb
+   rather than a table row. */
+.pl-capture{display:flex;flex-wrap:wrap;gap:6px;align-items:center;width:100%;
+  min-height:44px;padding:7px 8px;background:#fff;border:1px solid var(--color-divider);
+  border-radius:var(--radius-lg)}
+.pl-capture:focus-within{border-color:var(--color-accent)}
+.pl-chip{display:inline-flex;align-items:center;gap:4px;padding:7px 4px 7px 12px;
+  border-radius:var(--radius-sm);background:var(--color-accent-100);color:var(--color-accent-800);
+  font-weight:600;font-size:13.5px;white-space:nowrap}
+.pl-chip button{display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;border-radius:var(--radius-sm);border:0;background:transparent;
+  color:var(--color-accent-700);cursor:pointer;font-size:15px;line-height:1;padding:0}
+.pl-chip button:hover{background:color-mix(in srgb,var(--color-accent) 20%,transparent)}
+.pl-chip--dupe{animation:pl-dupe-pulse 320ms ease}
+@keyframes pl-dupe-pulse{
+  0%,100%{background:var(--color-accent-100);color:var(--color-accent-800)}
+  45%{background:var(--color-accent-2-200);color:var(--color-accent-2-800)}
+}
+@media (prefers-reduced-motion: reduce){.pl-chip--dupe{animation:none}}
+.pl-typer{flex:1;min-width:120px;border:0;outline:0;font:inherit;font-size:14px;
+  padding:6px 4px;background:transparent;color:var(--color-text)}
+.pl-typer::placeholder{color:color-mix(in srgb,var(--color-text) 40%,transparent)}
 
 @media (max-width:640px){
   .public-shell{padding:0}

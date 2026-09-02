@@ -4,7 +4,7 @@
 <div class="public-shell">
 <div class="public-card">
   <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
-    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.svg' %}" alt="Irritec" style="height:30px">
+    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.png' %}" alt="Irritec" style="height:30px">
     <span class="text-muted" style="font-size:12px">Entrega de logística</span>
   </div>
   <h2 style="margin:12px 0 6px">Listas de picking enviadas hoy</h2>
@@ -12,19 +12,20 @@
 
   <form method="post" novalidate>
     {% csrf_token %}
-    <div class="form-row-2" style="margin-top:var(--space-6)">
-      <div class="field"><label>Fecha de envío</label>{{ form.shipped_on }}</div>
-      <div class="field"><label>Enviado por</label>{{ form.sent_by }}</div>
-    </div>
+    <div class="field" style="margin-top:var(--space-6)"><label>Fecha de envío</label>{{ form.shipped_on }}</div>
 
     <div class="field" style="margin-top:var(--space-4)">
-      <label>Números de lista de picking</label>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-2)">
+        <label>Números de lista de picking</label>
+        <span class="text-muted" style="font-size:12px" data-pl-count></span>
+      </div>
+      <div class="pl-capture" data-pl-capture>
+        <input type="text" class="pl-typer" data-pl-typer placeholder="PL-8836…" aria-label="Números de lista de picking" autocomplete="off">
+      </div>
       {{ form.list_numbers }}
       {% if form.list_numbers.errors %}<ul class="error-list">{% for e in form.list_numbers.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
-      <p class="text-muted" style="font-size:12px;margin-top:4px">{{ form.list_numbers.help_text }}</p>
+      <p class="text-muted" style="font-size:12px;margin-top:4px" data-pl-help>{{ form.list_numbers.help_text }}</p>
     </div>
-
-    <div class="field" style="margin-top:var(--space-4)"><label>Cliente / ruta (opcional)</label>{{ form.customer_route }}</div>
 
     <div class="submit-row" style="margin-top:var(--space-6)">
       <button class="btn btn-primary" style="padding:11px 26px" type="submit">Entregar listas</button>
@@ -56,4 +57,121 @@
   </div>
 </div>
 </div>
+<script>
+// Turns the plain "PL-8836, PL-8837 …" textarea into a chip-per-number
+// capture strip. Without JS the textarea just stays visible and works
+// exactly as before — this only ever hides it once the richer UI is ready.
+(function () {
+  var wrap = document.querySelector('[data-pl-capture]');
+  var textarea = document.querySelector('textarea[name="list_numbers"]');
+  var typer = document.querySelector('[data-pl-typer]');
+  if (!wrap || !textarea || !typer) return;
+
+  var TOKEN_RE = /[A-Za-z]*-?\d+/g;
+  var countEl = document.querySelector('[data-pl-count]');
+  var helpEl = document.querySelector('[data-pl-help]');
+
+  var numbers = (textarea.value.match(TOKEN_RE) || []).reduce(function (acc, n) {
+    n = n.toUpperCase();
+    if (acc.indexOf(n) === -1) acc.push(n);
+    return acc;
+  }, []);
+
+  function render() {
+    wrap.querySelectorAll('.pl-chip').forEach(function (chip) { chip.remove(); });
+    numbers.forEach(function (number) {
+      var chip = document.createElement('span');
+      chip.className = 'pl-chip';
+      chip.dataset.number = number;
+      chip.appendChild(document.createTextNode(number));
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.setAttribute('aria-label', 'Quitar ' + number);
+      remove.textContent = '×';
+      remove.addEventListener('click', function () {
+        numbers = numbers.filter(function (n) { return n !== number; });
+        render();
+        typer.focus();
+      });
+      chip.appendChild(remove);
+      wrap.insertBefore(chip, typer);
+    });
+    textarea.value = numbers.join(', ');
+    if (countEl) {
+      countEl.textContent = numbers.length
+        ? numbers.length + (numbers.length === 1 ? ' capturada' : ' capturadas')
+        : '';
+    }
+  }
+
+  function pulseDupe(number) {
+    var chip = wrap.querySelector('.pl-chip[data-number="' + number + '"]');
+    if (!chip) return;
+    chip.classList.remove('pl-chip--dupe');
+    void chip.offsetWidth; // restart the animation
+    chip.classList.add('pl-chip--dupe');
+  }
+
+  function commit(raw) {
+    var matches = raw.match(TOKEN_RE);
+    if (!matches) return;
+    var added = false;
+    var dupes = [];
+    matches.forEach(function (m) {
+      var number = m.toUpperCase();
+      if (numbers.indexOf(number) === -1) {
+        numbers.push(number);
+        added = true;
+      } else {
+        dupes.push(number);
+      }
+    });
+    // Only rebuild the chip list if something new landed — a pure duplicate
+    // resubmission pulses the existing chip in place instead, since render()
+    // would otherwise recreate it fresh and the pulse would never paint.
+    if (added) render();
+    dupes.forEach(pulseDupe);
+  }
+
+  typer.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ' ') {
+      e.preventDefault();
+      if (typer.value.trim()) {
+        commit(typer.value);
+        typer.value = '';
+      }
+    } else if (e.key === 'Backspace' && !typer.value) {
+      numbers.pop();
+      render();
+    }
+  });
+
+  typer.addEventListener('paste', function (e) {
+    var text = (e.clipboardData || window.clipboardData).getData('text');
+    if (text.match(TOKEN_RE)) {
+      e.preventDefault();
+      commit(text);
+      typer.value = '';
+    }
+  });
+
+  typer.addEventListener('blur', function () {
+    if (typer.value.trim()) {
+      commit(typer.value);
+      typer.value = '';
+    }
+  });
+
+  wrap.addEventListener('click', function (e) {
+    if (e.target === wrap) typer.focus();
+  });
+
+  if (helpEl) {
+    helpEl.textContent = 'Escanea o escribe un número y presiona espacio, coma o Enter. Backspace borra el último.';
+  }
+
+  render();
+  textarea.hidden = true;
+})();
+</script>
 {% endblock %}

@@ -3,7 +3,7 @@
 {% block content %}
 <div class="app-shell">
   <aside class="app-sidebar">
-    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.svg' %}" alt="Irritec" style="margin:2px 0 0 6px">
+    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.png' %}" alt="Irritec" style="margin:2px 0 0 6px">
     <nav style="display:flex;flex-direction:column;gap:2px">
       <a class="nvi" href="{% url 'tracker:queue' %}" {% if active_nav == 'queue' %}aria-current="page"{% endif %}>Cola</a>
       <a class="nvi" href="{% url 'tracker:queue' %}?view=purchases" {% if active_nav == 'purchasing' %}aria-current="page"{% endif %}>Compras</a>

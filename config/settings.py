@@ -5,6 +5,7 @@ Django settings for config project.
 import os
 from pathlib import Path
 
+import dj_database_url
 from decouple import Csv, config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -17,6 +18,24 @@ SECRET_KEY = config(
 DEBUG = config("DJANGO_DEBUG", default=True, cast=bool)
 
 ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1", cast=Csv())
+CSRF_TRUSTED_ORIGINS = config("DJANGO_CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
+
+# Render sets this automatically for every service — trust it without
+# needing DJANGO_ALLOWED_HOSTS/DJANGO_CSRF_TRUSTED_ORIGINS configured by hand.
+RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
+    CSRF_TRUSTED_ORIGINS.append(f"https://{RENDER_EXTERNAL_HOSTNAME}")
+
+# Render terminates TLS at its proxy and forwards plain HTTP internally —
+# without this, request.is_secure() is always False behind it, breaking
+# secure cookies and CSRF checks.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
 
 
 # Application definition
@@ -27,13 +46,21 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    # staticfiles before cloudinary_storage: we want Django's own collectstatic
+    # (paired with WhiteNoise below), not cloudinary_storage's override, which
+    # also assumes the pre-4.2 STATICFILES_STORAGE setting and errors under
+    # the STORAGES dict this project uses.
     'django.contrib.staticfiles',
+    'cloudinary_storage',
+    'cloudinary',
     'django.contrib.humanize',
+    'anymail',
     'tracker',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -76,6 +103,12 @@ DATABASES = {
     }
 }
 
+# Render's managed Postgres is provisioned as a single DATABASE_URL — when
+# it's set (i.e. on Render), it overrides the discrete DB_* vars above,
+# which stay in charge for local dev.
+if config('DATABASE_URL', default=''):
+    DATABASES['default'] = dj_database_url.config(conn_max_age=600, ssl_require=True)
+
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
@@ -115,6 +148,25 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+# User-uploaded files (purchase request reference images) go to Cloudinary;
+# static assets (CSS/logo) are served straight off the web dyno by
+# WhiteNoise — hashed filenames + gzip/brotli, no separate static host
+# needed on Render.
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+CLOUDINARY_STORAGE = {
+    "CLOUD_NAME": config("CLOUDINARY_CLOUD_NAME", default=""),
+    "API_KEY": config("CLOUDINARY_API_KEY", default=""),
+    "API_SECRET": config("CLOUDINARY_API_SECRET", default=""),
+}
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 LOGIN_URL = 'tracker:login'
@@ -122,9 +174,28 @@ LOGIN_REDIRECT_URL = 'tracker:queue'
 LOGOUT_REDIRECT_URL = 'tracker:login'
 
 
-# Email — console backend for now; the flows notify requesters/assistants by
-# email in the design, but no real mail server is wired up yet.
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# Email — console backend by default so nothing needs configuring locally
+# (see tracker/emails.py for what gets sent). Set DJANGO_EMAIL_BACKEND and
+# MAILCHIMP_API_KEY below to send real mail through Mailchimp Transactional.
+EMAIL_BACKEND = config(
+    'DJANGO_EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend'
+)
+DEFAULT_FROM_EMAIL = config(
+    'DEFAULT_FROM_EMAIL', default='Irritec Seguimiento <no-reply@irritec.local>'
+)
+
+# Used to build absolute links (status page, panel links) inside emails.
+SITE_URL = config(
+    'SITE_URL',
+    default=f'https://{RENDER_EXTERNAL_HOSTNAME}' if RENDER_EXTERNAL_HOSTNAME else 'http://127.0.0.1:8000',
+)
+
+# Mailchimp Transactional (formerly Mandrill — same API, django-anymail keeps
+# the historical "mandrill" backend/setting names). Only used when
+# EMAIL_BACKEND is set to 'anymail.backends.mandrill.EmailBackend'.
+ANYMAIL = {
+    'MANDRILL_API_KEY': config('MAILCHIMP_API_KEY', default=''),
+}
 
 
 # KPI targets and bonus formula — see tracker/kpi.py. Kept here so the

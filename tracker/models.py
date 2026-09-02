@@ -1,5 +1,6 @@
 import uuid
 
+from cloudinary.models import CloudinaryField
 from django.conf import settings
 from django.db import models
 from django.urls import reverse
@@ -20,8 +21,8 @@ class PurchaseRequest(models.Model):
 
     class Status(models.TextChoices):
         REQUESTED = "requested", "Solicitada"
-        QUOTING = "quoting", "Cotizaciones solicitadas"
-        QUOTES_IN = "quotes_in", "Cotizaciones recibidas"
+        QUOTING = "quoting", "Cotizando"
+        AWAITING_CONFIRMATION = "awaiting_confirmation", "Esperando confirmación"
         PO_ISSUED = "po_issued", "Orden de compra emitida"
         CLOSED = "closed", "Cerrada"
         CANCELLED = "cancelled", "Cancelada"
@@ -34,8 +35,12 @@ class PurchaseRequest(models.Model):
     needed_by = models.DateField()
     justification = models.TextField(blank=True, verbose_name="¿Para qué se necesita?")
     urgency = models.CharField(max_length=20, choices=Urgency.choices, default=Urgency.STANDARD)
+    reference_image = CloudinaryField(
+        "imagen", folder="purchase_requests", blank=True, null=True,
+        help_text="Foto de referencia del artículo o la necesidad (opcional).",
+    )
 
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.REQUESTED)
+    status = models.CharField(max_length=25, choices=Status.choices, default=Status.REQUESTED)
     po_number = models.CharField(max_length=40, blank=True)
 
     handled_by = models.ForeignKey(
@@ -45,7 +50,10 @@ class PurchaseRequest(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
-    quoting_started_at = models.DateTimeField(null=True, blank=True)
+    quotes_sent_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo se le enviaron al solicitante las cotizaciones recopiladas para su confirmación.",
+    )
     po_issued_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
@@ -86,10 +94,15 @@ class PurchaseRequest(models.Model):
     def is_open(self):
         return self.status not in (self.Status.CLOSED, self.Status.CANCELLED)
 
+    # No "Solicitada" step here on purpose: the assistant's stepper starts
+    # at "Cotizando" straight away, since a freshly-requested purchase is
+    # already hers to start quoting — there's nothing distinct to show for
+    # the moment before the first quote lands. The `requested` status itself
+    # still exists on the model (see Status above) — it's what the public
+    # request_status page and the queue's "awaiting_quotes" stat key off of.
     STATUS_STEPS = [
-        (Status.REQUESTED, "Solicitada"),
-        (Status.QUOTING, "Cotizaciones solicitadas"),
-        (Status.QUOTES_IN, "Cotizaciones recibidas"),
+        (Status.QUOTING, "Cotizando"),
+        (Status.AWAITING_CONFIRMATION, "Esperando confirmación"),
         (Status.PO_ISSUED, "OC emitida"),
         (Status.CLOSED, "Cerrada"),
     ]
@@ -100,8 +113,11 @@ class PurchaseRequest(models.Model):
         stepper on the purchase detail page can distinguish "already passed"
         from "not reached yet" instead of only highlighting the active step."""
         order = [key for key, _ in self.STATUS_STEPS]
+        # `requested` isn't one of the visible steps — treat it as the start
+        # of "Cotizando" rather than leaving the whole stepper unhighlighted.
+        effective_status = self.Status.QUOTING if self.status == self.Status.REQUESTED else self.status
         try:
-            current_index = order.index(self.status)
+            current_index = order.index(effective_status)
         except ValueError:
             current_index = -1
         steps = []
@@ -119,8 +135,12 @@ class PurchaseRequest(models.Model):
 class PurchaseRequestItem(models.Model):
     request = models.ForeignKey(PurchaseRequest, related_name="items", on_delete=models.CASCADE)
     description = models.CharField(max_length=255)
-    quantity = models.DecimalField(max_digits=10, decimal_places=2)
+    quantity = models.PositiveIntegerField()
     unit = models.CharField(max_length=40, blank=True)
+    reference_image = CloudinaryField(
+        "imagen", folder="purchase_request_items", blank=True, null=True,
+        help_text="Foto de referencia de este artículo (opcional).",
+    )
 
     def __str__(self):
         return f"{self.quantity} {self.unit} — {self.description}"
@@ -129,9 +149,17 @@ class PurchaseRequestItem(models.Model):
 class SupplierQuote(models.Model):
     request = models.ForeignKey(PurchaseRequest, related_name="quotes", on_delete=models.CASCADE)
     supplier_name = models.CharField(max_length=150)
-    total_amount = models.DecimalField(max_digits=12, decimal_places=2)
-    currency = models.CharField(max_length=8, default="MXN")
-    lead_time_days = models.PositiveIntegerField()
+    quote_pdf = CloudinaryField(
+        "documento", resource_type="raw", folder="supplier_quotes", null=True,
+        help_text="PDF de la cotización del proveedor.",
+    )
+    # Optional now that the PDF is the source of truth — kept for the
+    # side-by-side comparison table, filled in only if the assistant wants
+    # a quick read of the totals without opening every PDF. Nullable at the
+    # DB level for quotes logged before quote_pdf existed.
+    total_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    currency = models.CharField(max_length=8, default="MXN", blank=True)
+    lead_time_days = models.PositiveIntegerField(blank=True, null=True)
     payment_terms = models.CharField(max_length=80, blank=True)
     received_at = models.DateTimeField(default=timezone.now)
     selected = models.BooleanField(default=False)
@@ -164,15 +192,13 @@ class PickingListBatch(models.Model):
     picking list numbers logged in a single form post."""
 
     shipped_on = models.DateField()
-    sent_by = models.CharField(max_length=120)
-    customer_route = models.CharField(max_length=150, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Lote {self.shipped_on} · {self.sent_by}"
+        return f"Lote {self.shipped_on}"
 
     @property
     def invoiced_count(self):
@@ -200,7 +226,6 @@ class PickingList(models.Model):
 
     number = models.CharField(max_length=20, unique=True)
     batch = models.ForeignKey(PickingListBatch, related_name="lists", on_delete=models.CASCADE)
-    customer_route = models.CharField(max_length=150, blank=True)
 
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.NOT_STARTED)
     handed_off_at = models.DateTimeField()

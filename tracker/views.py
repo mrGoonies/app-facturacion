@@ -9,6 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
+from .emails import send_purchase_request_created_emails, send_quotes_collected_email
 from .forms import (
     BillingErrorForm, BrandedAuthenticationForm, LogisticsHandoffForm,
     PurchaseRequestForm, PurchaseRequestItemFormSet, SupplierQuoteForm,
@@ -26,13 +27,14 @@ class BrandedLoginView(LoginView):
 
 def purchase_request_create(request):
     if request.method == "POST":
-        form = PurchaseRequestForm(request.POST)
-        formset = PurchaseRequestItemFormSet(request.POST)
+        form = PurchaseRequestForm(request.POST, request.FILES)
+        formset = PurchaseRequestItemFormSet(request.POST, request.FILES)
         if form.is_valid() and formset.is_valid():
             pr = form.save()
             formset.instance = pr
             formset.save()
             pr.activities.create(message="Solicitud recibida")
+            send_purchase_request_created_emails(pr)
             return redirect(pr.get_status_url())
     else:
         form = PurchaseRequestForm()
@@ -56,7 +58,6 @@ def logistics_handoff_create(request):
                     number=number,
                     defaults={
                         "batch": batch,
-                        "customer_route": batch.customer_route,
                         "handed_off_at": now,
                     },
                 )
@@ -114,7 +115,10 @@ def queue(request):
     view_filter = request.GET.get("view", "all")
 
     open_requests = PurchaseRequest.objects.filter(
-        status__in=[PurchaseRequest.Status.REQUESTED, PurchaseRequest.Status.QUOTING, PurchaseRequest.Status.QUOTES_IN]
+        status__in=[
+            PurchaseRequest.Status.REQUESTED, PurchaseRequest.Status.QUOTING,
+            PurchaseRequest.Status.AWAITING_CONFIRMATION,
+        ]
     ).prefetch_related("items")
     open_lists = PickingList.objects.exclude(
         status__in=[PickingList.Status.INVOICED]
@@ -148,8 +152,8 @@ def queue(request):
             status_label, status_class = "En proceso", "tag-accent"
         rows.append(QueueRow(
             ref=pl.number, kind="invoicing",
-            summary=f"Lista de picking · {pl.customer_route or pl.batch.customer_route or '—'}",
-            origin=pl.batch.sent_by,
+            summary="Lista de picking",
+            origin=f"Lote del {pl.batch.shipped_on:%d %b}",
             received=pl.handed_off_at.strftime("%d %b %H:%M"),
             time_left_label=label, time_left_class=css,
             status_label=status_label, status_class=status_class,
@@ -167,7 +171,7 @@ def queue(request):
 
     stats = {
         "awaiting_quotes": open_requests.filter(status=PurchaseRequest.Status.REQUESTED).count(),
-        "ready_to_issue": SupplierQuote.objects.filter(selected=True, request__status=PurchaseRequest.Status.QUOTES_IN).count(),
+        "ready_to_issue": SupplierQuote.objects.filter(selected=True, request__status=PurchaseRequest.Status.AWAITING_CONFIRMATION).count(),
         "lists_to_invoice": open_lists.exclude(status=PickingList.Status.ERROR).count(),
         "errors_to_correct": BillingError.objects.filter(corrected_at__isnull=True, disputed=False).count(),
     }
@@ -185,20 +189,17 @@ def purchase_detail(request, pk):
 
     if request.method == "POST":
         action = request.POST.get("action")
-        if action == "request_quotes":
-            pr.status = PurchaseRequest.Status.QUOTING
-            pr.quoting_started_at = timezone.now()
-            pr.save()
-            pr.activities.create(message="Cotizaciones solicitadas a proveedores")
-        elif action == "add_quote":
-            quote_form = SupplierQuoteForm(request.POST)
+        if action == "add_quote":
+            quote_form = SupplierQuoteForm(request.POST, request.FILES)
             if quote_form.is_valid():
                 quote = quote_form.save(commit=False)
                 quote.request = pr
                 quote.save()
-                pr.status = PurchaseRequest.Status.QUOTES_IN
+                pr.status = PurchaseRequest.Status.QUOTING
                 pr.save()
                 pr.activities.create(message=f"Cotización recibida de {quote.supplier_name}")
+            else:
+                messages.error(request, "Revisa la cotización — falta adjuntar el PDF o algún dato no es válido.")
         elif action == "select_quote":
             quote_id = request.POST.get("quote_id")
             pr.quotes.update(selected=False)
@@ -206,17 +207,38 @@ def purchase_detail(request, pk):
             quote.selected = True
             quote.save()
             pr.activities.create(message=f"Cotización seleccionada de {quote.supplier_name}")
+        elif action == "send_quotes_to_requester":
+            if not pr.quotes.exists():
+                messages.error(request, "Agrega al menos una cotización antes de enviarla al solicitante.")
+            else:
+                send_quotes_collected_email(pr)
+                pr.status = PurchaseRequest.Status.AWAITING_CONFIRMATION
+                pr.quotes_sent_at = timezone.now()
+                pr.save()
+                pr.activities.create(message=f"Cotizaciones enviadas a {pr.requester_name} para confirmación")
         elif action == "issue_po":
             selected = pr.quotes.filter(selected=True).first()
-            if selected:
+            if pr.status != PurchaseRequest.Status.AWAITING_CONFIRMATION:
+                messages.error(request, "Envía las cotizaciones al solicitante y espera su confirmación antes de emitir la orden de compra.")
+            elif not selected:
+                messages.error(request, "Selecciona una cotización antes de emitir la orden de compra.")
+            else:
                 pr.status = PurchaseRequest.Status.PO_ISSUED
                 pr.po_issued_at = timezone.now()
                 pr.po_number = f"PO-{2000 + pr.pk}"
                 pr.handled_by = request.user
                 pr.save()
                 pr.activities.create(message=f"Orden de compra {pr.po_number} emitida")
-            else:
-                messages.error(request, "Selecciona una cotización antes de emitir la orden de compra.")
+        elif action == "close_request":
+            pr.status = PurchaseRequest.Status.CLOSED
+            pr.closed_at = timezone.now()
+            pr.save()
+            pr.activities.create(message="Solicitud cerrada")
+        elif action == "cancel_request":
+            pr.status = PurchaseRequest.Status.CANCELLED
+            pr.closed_at = timezone.now()
+            pr.save()
+            pr.activities.create(message="Solicitud cancelada")
         return redirect("tracker:purchase_detail", pk=pk)
 
     quote_form = SupplierQuoteForm()

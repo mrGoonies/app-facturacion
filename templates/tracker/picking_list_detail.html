@@ -4,7 +4,7 @@
 {% block app_content %}
 <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-4)">
   <div>
-    <span class="text-muted" style="font-size:12px">{{ pl.number }} · entregada por {{ pl.batch.sent_by }}, {{ pl.handed_off_at|date:"d M H:i" }}{% if pl.invoice_number %} · factura {{ pl.invoice_number }}{% endif %}</span>
+    <span class="text-muted" style="font-size:12px">{{ pl.number }} · entregada {{ pl.handed_off_at|date:"d M H:i" }}{% if pl.invoice_number %} · factura {{ pl.invoice_number }}{% endif %}</span>
     <h3 style="margin:4px 0 0">Lista de picking {{ pl.number }}</h3>
   </div>
   {% with err=pl.open_error %}
@@ -49,7 +49,7 @@
     <table class="table">
       <thead><tr><th>Paso</th><th>Cuándo</th><th>Transcurrido</th><th>Por</th></tr></thead>
       <tbody>
-        <tr><td>Entregada por logística</td><td>{{ pl.handed_off_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td>{{ pl.batch.sent_by }}</td></tr>
+        <tr><td>Entregada por logística</td><td>{{ pl.handed_off_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td class="text-muted">—</td></tr>
         {% if pl.in_process_at %}
         <tr><td>Marcada <strong>En proceso</strong></td><td>{{ pl.in_process_at|date:"d M · H:i" }}</td><td>{{ pl.hand_off_to_process|hm }}</td><td>{{ pl.handled_by|default:"—" }}</td></tr>
         {% endif %}

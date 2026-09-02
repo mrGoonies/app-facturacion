@@ -8,6 +8,21 @@ from .models import BillingError, PickingListBatch, PurchaseRequest, PurchaseReq
 
 PL_NUMBER_RE = re.compile(r"[A-Za-z]*-?\d+")
 
+UNIT_CHOICES = [
+    ("", "Selecciona…"),
+    ("pza", "Pieza (pza)"),
+    ("caja", "Caja"),
+    ("kg", "Kilogramo (kg)"),
+    ("litro", "Litro (L)"),
+    ("metro", "Metro (m)"),
+    ("rollo", "Rollo"),
+    ("paquete", "Paquete"),
+    ("galon", "Galón"),
+    ("ton", "Tonelada"),
+    ("other", "Otro"),
+]
+UNIT_CHOICE_VALUES = {value for value, _ in UNIT_CHOICES if value}
+
 
 class StyledFormMixin:
     """Applies the design system's `.input` class to every text-like widget
@@ -35,24 +50,62 @@ class PurchaseRequestForm(StyledFormMixin, forms.ModelForm):
 
     class Meta:
         model = PurchaseRequest
-        fields = ["requester_name", "requester_email", "department", "needed_by", "justification", "urgency"]
+        fields = [
+            "requester_name", "requester_email", "department", "needed_by",
+            "justification", "urgency", "reference_image",
+        ]
         widgets = {
             "justification": forms.Textarea(attrs={"rows": 3}),
             "urgency": forms.RadioSelect,
         }
 
 
+class PurchaseRequestItemForm(StyledFormMixin, forms.ModelForm):
+    unit = forms.ChoiceField(
+        choices=UNIT_CHOICES, required=False, label="Unidad",
+        widget=forms.Select(attrs={"class": "input"}),
+    )
+    unit_other = forms.CharField(
+        required=False, label="Especifica la unidad",
+        widget=forms.TextInput(attrs={"class": "input", "placeholder": "Escribe la unidad"}),
+    )
+
+    class Meta:
+        model = PurchaseRequestItem
+        fields = ["description", "quantity", "unit", "reference_image"]
+        widgets = {
+            "description": forms.TextInput(attrs={"class": "input"}),
+            "quantity": forms.NumberInput(attrs={"class": "input", "step": "1", "min": "1"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Pre-existing rows whose stored unit isn't one of the standard
+        # choices (data entered before this selector existed, or edited
+        # directly in the admin) fall back to "Otro" with the raw text
+        # carried over, instead of silently losing it.
+        current = self.initial.get("unit")
+        if current and current not in UNIT_CHOICE_VALUES:
+            self.initial["unit"] = "other"
+            self.initial["unit_other"] = current
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("unit") == "other":
+            other = (cleaned.get("unit_other") or "").strip()
+            if not other:
+                self.add_error("unit_other", "Especifica la unidad.")
+            else:
+                cleaned["unit"] = other
+        return cleaned
+
+
 PurchaseRequestItemFormSet = inlineformset_factory(
     PurchaseRequest,
     PurchaseRequestItem,
-    fields=["description", "quantity", "unit"],
+    form=PurchaseRequestItemForm,
     extra=2,
     can_delete=True,
-    widgets={
-        "description": forms.TextInput(attrs={"class": "input"}),
-        "quantity": forms.NumberInput(attrs={"class": "input"}),
-        "unit": forms.TextInput(attrs={"class": "input"}),
-    },
 )
 
 
@@ -65,7 +118,7 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
 
     class Meta:
         model = PickingListBatch
-        fields = ["shipped_on", "sent_by", "customer_route"]
+        fields = ["shipped_on"]
 
     def clean_list_numbers(self):
         raw = self.cleaned_data["list_numbers"]
@@ -83,7 +136,13 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
 class SupplierQuoteForm(StyledFormMixin, forms.ModelForm):
     class Meta:
         model = SupplierQuote
-        fields = ["supplier_name", "total_amount", "currency", "lead_time_days", "payment_terms"]
+        fields = ["supplier_name", "quote_pdf", "total_amount", "currency", "lead_time_days", "payment_terms"]
+
+    def clean_quote_pdf(self):
+        pdf = self.cleaned_data.get("quote_pdf")
+        if pdf and not pdf.name.lower().endswith(".pdf"):
+            raise forms.ValidationError("El archivo debe ser un PDF.")
+        return pdf
 
 
 class BillingErrorForm(StyledFormMixin, forms.ModelForm):
