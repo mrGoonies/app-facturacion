@@ -1,0 +1,128 @@
+{% extends "tracker/_app_base.html" %}
+{% load tracker_extras %}
+{% block title %}{{ pl.number }} · Irritec Seguimiento de KPI{% endblock %}
+{% block app_content %}
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-4)">
+  <div>
+    <span class="text-muted" style="font-size:12px">{{ pl.number }} · entregada por {{ pl.batch.sent_by }}, {{ pl.handed_off_at|date:"d M H:i" }}{% if pl.invoice_number %} · factura {{ pl.invoice_number }}{% endif %}</span>
+    <h3 style="margin:4px 0 0">Lista de picking {{ pl.number }}</h3>
+  </div>
+  {% with err=pl.open_error %}
+  {% if err %}
+    <span class="tag" style="background:var(--color-alert);color:#fff;font-size:12px;padding:6px 14px">Error de facturación — corrección pendiente</span>
+  {% elif pl.status == 'invoiced' or pl.status == 'corrected' %}
+    <span class="tag tag-accent" style="font-size:12px;padding:6px 14px">{{ pl.get_status_display }}</span>
+  {% else %}
+    <span class="tag tag-neutral" style="font-size:12px;padding:6px 14px">{{ pl.get_status_display }}</span>
+  {% endif %}
+  {% endwith %}
+</div>
+
+<div class="stat-grid stat-grid--3">
+  <div class="card elev-sm" style="gap:2px">
+    <span class="card-kicker">Entrega → en proceso</span>
+    <span style="font-family:var(--font-heading);font-size:26px">{{ pl.hand_off_to_process|hm }}</span>
+    <span class="text-muted" style="font-size:12px">meta {{ pl.in_process_target_hours }} h{% if pl.is_in_process_on_time is not None %} · {% if pl.is_in_process_on_time %}a tiempo{% else %}atrasado{% endif %}{% endif %}</span>
+  </div>
+  <div class="card elev-sm" style="gap:2px">
+    <span class="card-kicker">Entrega → facturada</span>
+    <span style="font-family:var(--font-heading);font-size:26px">{{ pl.hand_off_to_invoice|hm }}</span>
+    <span class="text-muted" style="font-size:12px">meta {{ pl.invoice_target_hours }} h{% if pl.is_invoice_on_time is not None %} · {% if pl.is_invoice_on_time %}a tiempo{% else %}atrasado{% endif %}{% endif %}</span>
+  </div>
+  {% with err=pl.open_error %}
+  <div class="card elev-sm" style="gap:2px{% if err %};background:var(--color-alert-tint);border-color:#eccfcb{% endif %}">
+    <span class="card-kicker" {% if err %}style="color:var(--color-alert-ink)"{% endif %}>Corrección pendiente</span>
+    {% if err %}
+      <span style="font-family:var(--font-heading);font-size:26px">{{ err.reported_at|timesince }}</span>
+      <span class="text-muted" style="font-size:12px">desde que se reportó el error</span>
+    {% else %}
+      <span style="font-family:var(--font-heading);font-size:26px">—</span>
+      <span class="text-muted" style="font-size:12px">sin errores abiertos</span>
+    {% endif %}
+  </div>
+  {% endwith %}
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 400px;gap:var(--space-8)">
+  <div>
+    <h5>Historial de estado</h5>
+    <table class="table">
+      <thead><tr><th>Paso</th><th>Cuándo</th><th>Transcurrido</th><th>Por</th></tr></thead>
+      <tbody>
+        <tr><td>Entregada por logística</td><td>{{ pl.handed_off_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td>{{ pl.batch.sent_by }}</td></tr>
+        {% if pl.in_process_at %}
+        <tr><td>Marcada <strong>En proceso</strong></td><td>{{ pl.in_process_at|date:"d M · H:i" }}</td><td>{{ pl.hand_off_to_process|hm }}</td><td>{{ pl.handled_by|default:"—" }}</td></tr>
+        {% endif %}
+        {% if pl.invoiced_at %}
+        <tr><td>Factura {{ pl.invoice_number }} emitida</td><td>{{ pl.invoiced_at|date:"d M · H:i" }}</td><td>{{ pl.hand_off_to_invoice|hm }}</td><td>{{ pl.handled_by|default:"—" }}</td></tr>
+        {% endif %}
+        {% for err in pl.errors.all %}
+        <tr style="background:var(--color-alert-tint)"><td>Error de facturación reportado{% if err.disputed %} (disputado){% endif %}</td><td>{{ err.reported_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td>{{ err.reported_by|default:"Facturación" }}</td></tr>
+        {% if err.corrected_at %}
+        <tr><td>Factura corregida emitida</td><td>{{ err.corrected_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td>{{ pl.handled_by|default:"—" }}</td></tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% with err=pl.open_error %}
+    {% if err %}
+    <h5 style="margin-top:var(--space-6)">Error reportado</h5>
+    <div class="card" style="background:var(--color-alert-tint);border-color:#eccfcb">
+      <div style="display:flex;gap:var(--space-8);font-size:13px">
+        <div><div class="text-muted" style="font-size:11px">Tipo</div>{{ err.error_type }}</div>
+        <div><div class="text-muted" style="font-size:11px">Atribuible a</div>{{ err.get_attributable_to_display }}</div>
+        <div><div class="text-muted" style="font-size:11px">Reportado por</div>{{ err.reported_by|default:"—" }} · {{ err.reported_at|date:"d M H:i" }}</div>
+      </div>
+      {% if err.description %}<p class="card-body" style="opacity:1;font-size:14px">{{ err.description }}</p>{% endif %}
+    </div>
+
+    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);align-items:center">
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="correct_error"><input type="hidden" name="error_id" value="{{ err.pk }}">
+        <button class="btn btn-primary" style="padding:11px 26px" type="submit">Marcar como corregido</button>
+      </form>
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="dispute_error"><input type="hidden" name="error_id" value="{{ err.pk }}">
+        <button class="btn btn-secondary" type="submit">Disputar — no es nuestro error</button>
+      </form>
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);align-items:center">
+      {% if pl.status == 'not_started' %}
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="mark_in_process">
+        <button class="btn btn-primary" style="padding:11px 26px" type="submit">Marcar en proceso</button>
+      </form>
+      {% elif pl.status == 'in_process' %}
+      <form method="post" style="display:flex;gap:var(--space-2);align-items:end">{% csrf_token %}<input type="hidden" name="action" value="issue_invoice">
+        <div class="field"><label>Número de factura</label><input class="input" name="invoice_number" placeholder="F-…"></div>
+        <button class="btn btn-primary" style="padding:11px 26px" type="submit">Emitir factura</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    {% if not pl.open_error %}
+    <h5>Reportar un error</h5>
+    <p class="text-muted" style="font-size:13px">Opcional, pero el motivo es lo que alimenta el KPI de errores. Cualquiera en facturación o logística puede reportarlo.</p>
+    <form method="post" class="card" style="gap:var(--space-3)">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="report_error">
+      <div class="field"><label>Factura</label>{{ error_form.invoice_number }}</div>
+      <div class="field"><label>Tipo de error</label>{{ error_form.error_type }}</div>
+      <div class="field"><label>Reportado por</label>{{ error_form.reported_by }}</div>
+      <div class="field"><label>Atribuible a</label></div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:-8px">
+        {% for radio in error_form.attributable_to %}
+        <label class="radio">{{ radio.tag }}<span class="dot"></span>{{ radio.choice_label }}</label>
+        {% endfor %}
+      </div>
+      <div class="field"><label>¿Qué salió mal?</label>{{ error_form.description }}</div>
+      <button class="btn btn-primary btn-block" type="submit">Reportar error</button>
+    </form>
+    <p class="text-muted" style="font-size:12px;margin-top:var(--space-3)">Solo los errores marcados como <em>Asistente</em> reducen el bono. Los demás quedan registrados para la revisión mensual.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

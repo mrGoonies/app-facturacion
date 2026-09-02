@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<div class="public-shell">
+<div class="public-card">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
+    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.svg' %}" alt="Irritec" style="height:30px">
+    <span class="text-muted" style="font-size:12px">Seguimiento de KPI</span>
+  </div>
+  <h2 style="margin:12px 0 6px">¿Qué necesitas hacer?</h2>
+  <p class="text-muted" style="max-width:52ch;font-size:14px">Ninguno de los formularios de abajo requiere cuenta — compras y logística registran su propio tiempo automáticamente.</p>
+
+  <div class="form-row-2" style="margin-top:var(--space-6)">
+    <a class="card elev-sm" style="text-decoration:none;color:inherit;gap:var(--space-2)" href="{% url 'tracker:purchase_request_create' %}">
+      <span class="card-kicker">Compras</span>
+      <span class="card-title">Solicitar una compra</span>
+      <span class="card-body">Describe lo que necesitas comprar — el tiempo del KPI de compras empieza a correr en cuanto lo envías.</span>
+    </a>
+    <a class="card elev-sm" style="text-decoration:none;color:inherit;gap:var(--space-2)" href="{% url 'tracker:logistics_handoff' %}">
+      <span class="card-kicker">Logística</span>
+      <span class="card-title">Entregar listas de picking</span>
+      <span class="card-body">Registra cada lista de picking que salió del almacén hoy — esto inicia el tiempo de facturación.</span>
+    </a>
+  </div>
+
+  <p class="text-muted" style="font-size:12px;margin-top:var(--space-6)">¿Eres la asistente? <a href="{% url 'tracker:queue' %}">Ir al panel de trabajo</a></p>
+</div>
+</div>
+{% endblock %}

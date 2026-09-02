@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<div class="public-shell">
+<div class="public-card public-card--narrow">
+  <div style="display:flex;align-items:baseline;gap:12px">
+    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.svg' %}" alt="Irritec" style="height:30px">
+    <span class="text-muted" style="font-size:12px">{{ pr.display_ref }}</span>
+  </div>
+
+  {% if pr.status == 'requested' %}
+    <h3 style="margin:14px 0 4px">Solicitud recibida</h3>
+    <p class="text-muted" style="font-size:14px">Compras tiene tu solicitud y se pondrá en contacto en cuanto lleguen las cotizaciones.</p>
+  {% elif pr.status == 'quoting' %}
+    <h3 style="margin:14px 0 4px">Obteniendo cotizaciones</h3>
+    <p class="text-muted" style="font-size:14px">Compras está solicitando cotizaciones a proveedores.</p>
+  {% elif pr.status == 'quotes_in' %}
+    <h3 style="margin:14px 0 4px">Tus cotizaciones ya están</h3>
+    <p class="text-muted" style="font-size:14px">Compras tiene {{ pr.quotes.count }} {% if pr.quotes.count == 1 %}cotización{% else %}cotizaciones{% endif %}. Se espera una orden de compra pronto.</p>
+  {% elif pr.status == 'po_issued' %}
+    <h3 style="margin:14px 0 4px">Orden de compra emitida</h3>
+    <p class="text-muted" style="font-size:14px">{{ pr.po_number }} fue emitida con {{ pr.selected_quote.supplier_name }}.</p>
+  {% elif pr.status == 'closed' %}
+    <h3 style="margin:14px 0 4px">Solicitud cerrada</h3>
+    <p class="text-muted" style="font-size:14px">Esta solicitud fue entregada y cerrada.</p>
+  {% else %}
+    <h3 style="margin:14px 0 4px">Solicitud cancelada</h3>
+  {% endif %}
+
+  <div style="display:flex;flex-direction:column;gap:0;margin:var(--space-6) 0">
+    {% for activity in pr.activities.all %}
+    <div style="display:flex;gap:14px">
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <span style="width:14px;height:14px;border-radius:999px;background:var(--color-accent)"></span>
+        {% if not forloop.last %}<span style="width:2px;flex:1;background:var(--color-accent-300)"></span>{% endif %}
+      </div>
+      <div style="padding-bottom:var(--space-4)">
+        <strong style="font-size:14px">{{ activity.message }}</strong>
+        <div class="text-muted" style="font-size:12px">{{ activity.created_at|date:"d M H:i" }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <span class="card-kicker">Tus artículos</span>
+    <div style="font-size:14px">
+      {% for item in pr.items.all %}{{ item.quantity|floatformat:"0" }} × {{ item.description }}<br>{% endfor %}
+    </div>
+    <div class="card-meta">Se necesita antes del {{ pr.needed_by|date:"d M" }} · {{ pr.get_urgency_display }}</div>
+  </div>
+</div>
+</div>
+{% endblock %}

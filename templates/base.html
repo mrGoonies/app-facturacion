@@ -1,0 +1,21 @@
+{% load static %}<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Irritec · Seguimiento de KPI{% endblock %}</title>
+<link rel="icon" href="{% static 'tracker/img/irritec-logo.svg' %}" type="image/svg+xml">
+<link rel="stylesheet" href="{% static 'tracker/css/app.css' %}">
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+{% if messages %}
+<div style="max-width:820px;margin:12px auto 0;padding:0 24px;position:relative;z-index:1">
+  {% for message in messages %}
+    <div class="card" style="background:var(--color-accent-100);border-color:var(--color-accent-300);margin-bottom:8px">{{ message }}</div>
+  {% endfor %}
+</div>
+{% endif %}
+{% block content %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,119 @@
+{% extends "tracker/_app_base.html" %}
+{% load tracker_extras humanize %}
+{% block title %}{{ pr.display_ref }} · Irritec Seguimiento de KPI{% endblock %}
+{% block app_content %}
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-4)">
+  <div>
+    <span class="text-muted" style="font-size:12px">{{ pr.display_ref }} · solicitado por {{ pr.requester_name }}, {{ pr.department }} · {{ pr.get_urgency_display }}</span>
+    <h3 style="margin:4px 0 0">{{ pr.items.first.description|default:"Solicitud de compra" }}</h3>
+  </div>
+  <div style="text-align:right">
+    <div class="text-muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em">Tiempo a OC</div>
+    <div style="font-family:var(--font-heading);font-size:28px;line-height:1.1">{{ pr.time_to_po|hm }}</div>
+    <div class="text-muted" style="font-size:12px">de meta {{ pr.po_target_hours }} h</div>
+  </div>
+</div>
+
+<div class="stepper" style="margin:var(--space-6) 0">
+  {% for step in pr.status_steps %}
+  <span class="stepper-seg stepper-seg--{{ step.state }}">{{ step.label }}{% if step.state == 'current' and step.key == 'quotes_in' %} · elige una{% endif %}</span>
+  {% endfor %}
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 320px;gap:var(--space-8)">
+  <div>
+    <h5>Cotizaciones recibidas</h5>
+    <div style="display:flex;flex-direction:column;gap:var(--space-3)">
+      {% for quote in pr.quotes.all %}
+      <div class="card {% if quote.selected %}elev-md{% else %}elev-sm{% endif %}" style="{% if quote.selected %}border:2px solid var(--color-accent){% endif %}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span class="card-title">{{ quote.supplier_name }}</span>
+          {% if quote.selected %}
+            <span class="tag" style="background:var(--color-accent);color:#fff">Seleccionada</span>
+          {% elif pr.status == 'quotes_in' or pr.status == 'quoting' %}
+            <form method="post" style="margin:0">
+              {% csrf_token %}
+              <input type="hidden" name="action" value="select_quote">
+              <input type="hidden" name="quote_id" value="{{ quote.pk }}">
+              <button class="btn btn-secondary" type="submit">Seleccionar</button>
+            </form>
+          {% endif %}
+        </div>
+        <div style="display:flex;gap:var(--space-8);font-size:13px">
+          <div><div class="text-muted" style="font-size:11px">Total</div>{{ quote.currency }} {{ quote.total_amount|floatformat:0|intcomma }}</div>
+          <div><div class="text-muted" style="font-size:11px">Tiempo de entrega</div>{{ quote.lead_time_days }} días</div>
+          <div><div class="text-muted" style="font-size:11px">Pago</div>{{ quote.payment_terms|default:"—" }}</div>
+          <div><div class="text-muted" style="font-size:11px">Cotización recibida</div>{{ quote.received_at|date:"d M H:i" }}</div>
+        </div>
+      </div>
+      {% empty %}
+      <p class="text-muted" style="font-size:13px">Aún no hay cotizaciones.</p>
+      {% endfor %}
+    </div>
+
+    {% if pr.status == 'requested' or pr.status == 'quoting' %}
+    <h5 style="margin-top:var(--space-6)">Agregar una cotización</h5>
+    <form method="post" class="card" style="gap:var(--space-3)">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="add_quote">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)">
+        <div class="field"><label>Proveedor</label>{{ quote_form.supplier_name }}</div>
+        <div class="field"><label>Total</label>{{ quote_form.total_amount }}</div>
+        <div class="field"><label>Moneda</label>{{ quote_form.currency }}</div>
+        <div class="field"><label>Tiempo de entrega (días)</label>{{ quote_form.lead_time_days }}</div>
+        <div class="field" style="grid-column:1/-1"><label>Condiciones de pago</label>{{ quote_form.payment_terms }}</div>
+      </div>
+      <button class="btn btn-secondary btn-block" type="submit">Agregar cotización</button>
+    </form>
+    {% if pr.status == 'requested' %}
+    <form method="post" style="margin-top:var(--space-2)">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="request_quotes">
+      <button class="btn btn-ghost" type="submit">Marcar cotizaciones como solicitadas a proveedores</button>
+    </form>
+    {% endif %}
+    {% endif %}
+
+    <h5 style="margin-top:var(--space-6)">Artículos solicitados</h5>
+    <div class="table-scroll">
+    <table class="table">
+      <thead><tr><th>Descripción</th><th style="width:70px">Cant.</th><th style="width:110px">Unidad</th></tr></thead>
+      <tbody>
+      {% for item in pr.items.all %}
+        <tr><td>{{ item.description }}</td><td>{{ item.quantity|floatformat:"-2" }}</td><td>{{ item.unit }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+
+    {% if pr.selected_quote and pr.status != 'po_issued' and pr.status != 'closed' %}
+    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-6);align-items:center">
+      <form method="post"><input type="hidden" name="action" value="issue_po">{% csrf_token %}
+        <button class="btn btn-primary" style="padding:12px 28px" type="submit">Emitir orden de compra</button>
+      </form>
+      <span class="text-muted" style="font-size:12px">{{ pr.requester_name }} será notificado automáticamente.</span>
+    </div>
+    {% elif pr.status == 'po_issued' %}
+    <p class="card-body" style="margin-top:var(--space-4)"><strong>{{ pr.po_number }}</strong> emitida el {{ pr.po_issued_at|date:"d M H:i" }}.</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <h5>Actividad</h5>
+    <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:13px">
+      {% for activity in pr.activities.all reversed %}
+      <div style="display:flex;gap:10px">
+        <span style="width:8px;height:8px;border-radius:999px;background:var(--color-accent-500);margin-top:6px;flex:none"></span>
+        <div><strong>{{ activity.message }}</strong><div class="text-muted">{{ activity.created_at|date:"d M H:i" }}</div></div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="card" style="margin-top:var(--space-6);background:var(--color-accent-100)">
+      <span class="card-kicker" style="color:var(--color-accent-700)">Cuenta para el KPI</span>
+      <p class="card-body" style="opacity:1">Solicitud → OC emitida, meta {{ pr.po_target_hours }} h.
+        {% if pr.is_po_on_time is not None %}{% if pr.is_po_on_time %}A tiempo.{% else %}Meta no cumplida.{% endif %}{% endif %}</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

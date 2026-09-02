@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% load static tracker_extras %}
+{% block content %}
+<div class="public-shell">
+<div class="public-card">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
+    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.svg' %}" alt="Irritec" style="height:30px">
+    <span class="text-muted" style="font-size:12px">Entrega de logística</span>
+  </div>
+  <h2 style="margin:12px 0 6px">Listas de picking enviadas hoy</h2>
+  <p class="text-muted" style="max-width:54ch;font-size:14px">Registra cada lista que salió del almacén. Al enviar este formulario inicia el tiempo de facturación para la asistente administrativa.</p>
+
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <div class="form-row-2" style="margin-top:var(--space-6)">
+      <div class="field"><label>Fecha de envío</label>{{ form.shipped_on }}</div>
+      <div class="field"><label>Enviado por</label>{{ form.sent_by }}</div>
+    </div>
+
+    <div class="field" style="margin-top:var(--space-4)">
+      <label>Números de lista de picking</label>
+      {{ form.list_numbers }}
+      {% if form.list_numbers.errors %}<ul class="error-list">{% for e in form.list_numbers.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <p class="text-muted" style="font-size:12px;margin-top:4px">{{ form.list_numbers.help_text }}</p>
+    </div>
+
+    <div class="field" style="margin-top:var(--space-4)"><label>Cliente / ruta (opcional)</label>{{ form.customer_route }}</div>
+
+    <div class="submit-row" style="margin-top:var(--space-6)">
+      <button class="btn btn-primary" style="padding:11px 26px" type="submit">Entregar listas</button>
+      <span class="text-muted" style="font-size:12px">La asistente es notificada de inmediato · meta: cambio de estado dentro de 2 h</span>
+    </div>
+  </form>
+
+  <hr class="hr">
+  <h5 style="margin-bottom:var(--space-2)">Enviadas esta semana</h5>
+  <div class="table-scroll">
+  <table class="table">
+    <thead><tr><th>Fecha</th><th>Listas</th><th>Facturadas</th><th>Errores</th><th>Tiempo prom. a factura</th></tr></thead>
+    <tbody>
+    {% for batch in recent_batches %}
+      <tr>
+        <td>{{ batch.shipped_on|date:"d M" }}</td>
+        <td>{{ batch.lists.count }}</td>
+        <td>{{ batch.invoiced_count }}</td>
+        <td>
+          {% if batch.error_count %}<span class="tag tag-alert">{{ batch.error_count }}</span>{% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td>{{ batch.avg_time_to_invoice|hm }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="text-muted">Aún no se han registrado entregas.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+</div>
+{% endblock %}

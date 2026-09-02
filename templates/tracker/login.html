@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<div class="public-shell">
+<div class="public-card public-card--narrow">
+  <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px">
+    <img class="brandmark" src="{% static 'tracker/img/irritec-logo.svg' %}" alt="Irritec" style="height:30px">
+    <span class="text-muted" style="font-size:12px">Panel de la asistente</span>
+  </div>
+  <h2 style="margin:12px 0 6px">Iniciar sesión</h2>
+  {% if form.errors %}
+    <p style="color:var(--color-alert-ink);font-size:13px">Usuario o contraseña inválidos.</p>
+  {% endif %}
+  <form method="post" style="display:flex;flex-direction:column;gap:var(--space-4);margin-top:var(--space-4)">
+    {% csrf_token %}
+    <div class="field"><label>Usuario</label>{{ form.username }}</div>
+    <div class="field"><label>Contraseña</label>{{ form.password }}</div>
+    <button class="btn btn-primary" style="padding:11px 26px" type="submit">Iniciar sesión</button>
+    <input type="hidden" name="next" value="{{ next }}">
+  </form>
+</div>
+</div>
+{% endblock %}

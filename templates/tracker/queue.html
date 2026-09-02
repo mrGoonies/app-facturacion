@@ -1,0 +1,45 @@
+{% extends "tracker/_app_base.html" %}
+{% block title %}Cola · Irritec Seguimiento de KPI{% endblock %}
+{% block app_content %}
+<div style="display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-4)">
+  <div>
+    <h3 style="margin:0">Cola</h3>
+    <p class="text-muted" style="font-size:13px;margin:2px 0 0">{{ today|date:"l j F" }} · {{ rows|length }} {% if rows|length == 1 %}pendiente{% else %}pendientes{% endif %}</p>
+  </div>
+  <div style="display:flex;gap:var(--space-2);align-items:center">
+    <span class="seg">
+      <span class="seg-opt"><a href="?view=all" style="text-decoration:none;color:inherit">Todo</a></span>
+      <span class="seg-opt"><a href="?view=purchases" style="text-decoration:none;color:inherit">Compras</a></span>
+      <span class="seg-opt"><a href="?view=invoicing" style="text-decoration:none;color:inherit">Facturación</a></span>
+    </span>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="card elev-sm" style="gap:2px"><span class="card-kicker">Esperando cotizaciones</span><span class="stat-number">{{ stats.awaiting_quotes }}</span></div>
+  <div class="card elev-sm" style="gap:2px"><span class="card-kicker">Listas para emitir OC</span><span class="stat-number">{{ stats.ready_to_issue }}</span></div>
+  <div class="card elev-sm" style="gap:2px"><span class="card-kicker">Listas por facturar</span><span class="stat-number">{{ stats.lists_to_invoice }}</span></div>
+  <div class="card elev-sm" style="gap:2px;background:var(--color-alert-tint);border-color:#eccfcb"><span class="card-kicker" style="color:var(--color-alert-ink)">Errores por corregir</span><span class="stat-number">{{ stats.errors_to_correct }}</span></div>
+</div>
+
+<div class="table-scroll">
+<table class="table">
+  <thead><tr><th>Ref</th><th>Tipo</th><th>Artículo</th><th>De</th><th>Recibido</th><th>Tiempo restante</th><th>Estado</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><a href="{{ row.url }}">{{ row.ref }}</a></td>
+      <td><span class="tag tag-type">{% if row.kind == 'purchase' %}Compra{% else %}Facturación{% endif %}</span></td>
+      <td>{{ row.summary }}</td>
+      <td>{{ row.origin }}</td>
+      <td>{{ row.received }}</td>
+      <td><span class="tag {{ row.time_left_class }}">{{ row.time_left_label }}</span></td>
+      <td><span class="tag {{ row.status_class }}">{{ row.status_label }}</span></td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="7" class="text-muted">No hay nada pendiente por ahora.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

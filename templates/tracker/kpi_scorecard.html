@@ -1,0 +1,95 @@
+{% extends "tracker/_app_base.html" %}
+{% load tracker_extras humanize %}
+{% block title %}Mis KPIs · Irritec Seguimiento de KPI{% endblock %}
+{% block app_content %}
+<div style="display:flex;align-items:flex-end;justify-content:space-between">
+  <div>
+    <h3 style="margin:0">Balance de {{ card.month_label }}</h3>
+    <p class="text-muted" style="font-size:13px;margin:2px 0 0">{{ request.user.get_full_name|default:request.user.get_username }} · cierra fin de mes</p>
+  </div>
+  <span class="seg">
+    {% for y, m, label in months %}
+    <span class="seg-opt"{% if m == month and y == year %} style="background:var(--color-accent);color:#fff"{% endif %}><a href="?year={{ y }}&month={{ m }}" style="text-decoration:none;color:inherit">{{ label }}</a></span>
+    {% endfor %}
+  </span>
+</div>
+
+<div style="display:flex;align-items:center;gap:var(--space-8);background:var(--color-surface);border-radius:calc(var(--radius-lg)*1.15);padding:var(--space-6) var(--space-8);margin:var(--space-6) 0">
+  <div style="flex:none">
+    <div class="text-muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em">Cumplimiento</div>
+    <div style="font-family:var(--font-heading);font-size:64px;line-height:1">{{ card.attainment|floatformat:0 }}%</div>
+  </div>
+  <div style="flex:1">
+    <div class="gauge-track">
+      <div class="gauge-fill" style="width:{{ card.attainment }}%"></div>
+      <span class="gauge-mark" style="left:{{ card.bonus_threshold_pct }}%"></span>
+      <span class="gauge-mark" style="left:{{ card.attainment_target_pct }}%"></span>
+    </div>
+    <div class="gauge-scale">
+      <span class="gauge-scale-end gauge-scale-end--start">0%</span>
+      <span class="gauge-scale-mark" style="left:{{ card.bonus_threshold_pct }}%">umbral {{ card.bonus_threshold_pct|floatformat:0 }}%</span>
+      <span class="gauge-scale-mark" style="left:{{ card.attainment_target_pct }}%">meta {{ card.attainment_target_pct|floatformat:0 }}%</span>
+      <span class="gauge-scale-end gauge-scale-end--end">100%</span>
+    </div>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="card elev-sm" style="gap:2px"><span class="card-kicker">Prom. solicitud → OC</span><span class="stat-number">{% if card.avg_po_hours %}{{ card.avg_po_hours|floatformat:0 }} h{% else %}—{% endif %}</span><span class="text-muted" style="font-size:12px">meta ≤ {{ po_target_hours }} h · {{ card.po_total_count }} solicitudes</span></div>
+  <div class="card elev-sm" style="gap:2px"><span class="card-kicker">OC a tiempo</span><span class="stat-number">{{ card.po_on_time_count }}/{{ card.po_total_count }}</span><span class="text-muted" style="font-size:12px">{% if card.po_on_time_rate %}{{ card.po_on_time_rate|floatformat:0 }}%{% else %}—{% endif %}</span></div>
+  <div class="card elev-sm" style="gap:2px"><span class="card-kicker">Prom. lista → factura</span><span class="stat-number">{% if card.avg_invoice_hours %}{{ card.avg_invoice_hours|floatformat:1 }} h{% else %}—{% endif %}</span><span class="text-muted" style="font-size:12px">{{ card.invoice_lists_count }} listas</span></div>
+  <div class="card elev-sm" style="gap:2px"><span class="card-kicker">Tasa de error de facturación</span><span class="stat-number">{% if card.error_rate is not None %}{{ card.error_rate|floatformat:1 }}%{% else %}—{% endif %}</span><span class="text-muted" style="font-size:12px">{{ card.error_count }} errores</span></div>
+</div>
+
+<h5 style="margin-top:var(--space-8)">Cómo se calcula el puntaje</h5>
+<table class="table">
+  <thead><tr><th>Indicador</th><th>Meta</th><th>Real</th><th>Peso</th><th>Puntaje</th></tr></thead>
+  <tbody>
+  {% for ind in card.indicators %}
+    <tr>
+      <td>{{ ind.label }}</td>
+      <td>{{ ind.target_label }}</td>
+      <td>{{ ind.actual_label }}</td>
+      <td>{{ ind.weight|floatformat:0 }}%</td>
+      <td>{{ ind.score }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<div class="card" style="margin-top:var(--space-6);background:var(--color-accent-100);flex-direction:row;align-items:center;gap:var(--space-8);padding:var(--space-4) var(--space-6)">
+  <div>
+    <div class="card-kicker" style="color:var(--color-accent-700)">Bono a pagar</div>
+    <div style="font-family:var(--font-heading);font-size:34px">MXN {{ card.bonus_payable|floatformat:0|intcomma }}</div>
+  </div>
+  <div style="font-size:13px" class="text-muted">
+    {% if card.attainment < card.bonus_threshold_pct %}
+      Por debajo del umbral de {{ card.bonus_threshold_pct|floatformat:0 }}% — no se paga bono este mes.
+    {% else %}
+      Bono base escalado por {{ card.attainment|floatformat:0 }}% de cumplimiento. Por encima de 100% el bono queda topado.
+    {% endif %}
+  </div>
+</div>
+
+<h5 style="margin-top:var(--space-8)">Errores de este mes</h5>
+<table class="table">
+  <thead><tr><th>Lista</th><th>Factura</th><th>Motivo indicado</th><th>Atribuible a</th><th>Corregido en</th></tr></thead>
+  <tbody>
+  {% for err in card.errors %}
+    <tr>
+      <td><a href="{% url 'tracker:picking_list_detail' err.picking_list.number %}">{{ err.picking_list.number }}</a></td>
+      <td>{{ err.invoice_number|default:"—" }}</td>
+      <td>{{ err.error_type }}</td>
+      <td>
+        {% if err.attributable_to == 'assistant' %}<span class="tag tag-alert">Asistente</span>
+        {% elif err.attributable_to == 'logistics' %}<span class="tag tag-accent-2">Datos de logística</span>
+        {% else %}<span class="tag tag-neutral">Datos del cliente</span>{% endif %}
+      </td>
+      <td>{% if err.disputed %}<span class="text-muted">disputado</span>{% elif err.corrected_at %}{{ err.corrected_at|timeuntil:err.reported_at }}{% else %}<span class="text-muted">abierto</span>{% endif %}</td>
+    </tr>
+  {% empty %}
+    <tr><td colspan="5" class="text-muted">No se reportaron errores este mes.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

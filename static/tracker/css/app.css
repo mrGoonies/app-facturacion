@@ -1,0 +1,205 @@
+/* Irritec KPI tracker — design system.
+   Structural rules ported from the "Organic" design system used for the
+   approved mockups (KPI Tracker Mockups v2.dc.html); tokens/overrides below
+   are the Irritec re-theme from that same file (logo palette, Archivo type,
+   flat 8-14px corners instead of pills). Keep this file as the single source
+   of truth rather than re-splitting it — there's no design-canvas runtime to
+   layer it on top of here. */
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&family=Archivo:wght@600;700;800&display=swap');
+
+:root{
+  --color-bg:#f3f5f3;--color-surface:#e8ece9;--color-text:#1c211e;
+  --color-accent:#046648;--color-accent-2:#a8631c;
+  --color-divider:color-mix(in srgb,#1c211e 14%,transparent);
+
+  --color-accent-100:#e7f2ec;--color-accent-200:#c6e2d6;--color-accent-300:#96c9b4;--color-accent-400:#4ea886;--color-accent-500:#0d7f5c;--color-accent-600:#046648;--color-accent-700:#045139;--color-accent-800:#033b29;--color-accent-900:#02251a;
+  --color-accent-2-100:#fdf0e2;--color-accent-2-200:#f8ddbe;--color-accent-2-300:#eec392;--color-accent-2-400:#dda05a;--color-accent-2-500:#c8811f;--color-accent-2-600:#a8631c;--color-accent-2-700:#834b16;--color-accent-2-800:#5e3510;--color-accent-2-900:#3b210a;
+  --color-neutral-100:#f6f7f6;--color-neutral-200:#e9ebe9;--color-neutral-300:#d6d8d6;--color-neutral-400:#bcbdbc;--color-neutral-500:#9c9b9b;--color-neutral-600:#7d7c7c;--color-neutral-700:#5e5d5d;--color-neutral-800:#434342;--color-neutral-900:#292928;
+
+  --color-alert:#a8322a;--color-alert-tint:#faeae8;--color-alert-ink:#7d241e;
+
+  --font-heading:"Archivo","Figtree",system-ui,sans-serif;--font-heading-weight:800;
+  --font-body:"Figtree",system-ui,sans-serif;
+
+  --space-1:4.4px;--space-2:8.8px;--space-3:13.2px;--space-4:17.6px;--space-6:26.4px;--space-8:35.2px;
+
+  --radius-sm:6px;--radius-md:10px;--radius-lg:14px;
+
+  --shadow-sm:0 1px 2px rgba(28,33,30,.10);--shadow-md:0 2px 8px rgba(28,33,30,.10);--shadow-lg:0 10px 28px rgba(28,33,30,.14);
+}
+
+:root{--transition-fast:120ms ease;--transition-base:180ms ease}
+@media (prefers-reduced-motion: reduce){:root{--transition-fast:0ms;--transition-base:0ms}}
+
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;font-size:15px;line-height:1.55;font-weight:400;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)}
+h1,h2,h3,h4,h5,h6{font-family:var(--font-heading);font-weight:var(--font-heading-weight);line-height:1.12;letter-spacing:-0.02em;margin:0 0 var(--space-2)}
+h1{font-size:42px}h2{font-size:32px}h3{font-size:25px}h4{font-size:20px}h5{font-size:16px}h6{font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+p{margin:0 0 var(--space-3)}
+a{color:var(--color-accent);text-underline-offset:3px}
+img{display:block;max-width:100%}
+.text-muted{color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
+
+.hr{height:1px;border:0;margin:var(--space-4) 0;background:var(--color-divider)}
+
+/* — buttons — */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;text-decoration:none;
+  font-family:var(--font-heading);font-weight:700;font-size:13.5px;letter-spacing:.005em;color:var(--color-text);
+  background:transparent;border:1px solid transparent;padding:var(--space-2) calc(var(--space-3) * 1.2);border-radius:8px;
+  transition:background var(--transition-fast),border-color var(--transition-fast),transform var(--transition-fast)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--color-accent);color:#fff}
+.btn-primary:hover{background:var(--color-accent-700)}
+.btn-primary:active{background:var(--color-accent-800);transform:translateY(1px)}
+.btn-secondary{border-color:var(--color-divider)}
+.btn-secondary:hover{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.btn-ghost{color:var(--color-accent);padding-inline:var(--space-1)}
+.btn-ghost:hover{background:color-mix(in srgb,var(--color-accent) 10%,transparent)}
+.btn-block{width:100%;margin-top:var(--space-2)}
+
+/* — forms — */
+.field>label{display:block;font-size:12px;margin-bottom:5px;color:color-mix(in srgb,var(--color-text) 70%,transparent)}
+.input{width:100%;min-height:36px;padding:6px 12px;font:inherit;font-size:14px;color:var(--color-text);
+  caret-color:var(--color-accent);background:#fff;border:1px solid var(--color-divider);border-radius:8px}
+.input:hover{border-color:color-mix(in srgb,var(--color-text) 45%,transparent)}
+.input:focus-visible{border-color:var(--color-accent);outline-offset:0}
+textarea.input{min-height:90px;resize:vertical;border-radius:var(--radius-lg)}
+.radio{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:14px}
+.radio input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.radio .dot{width:16px;height:16px;flex:none;border-radius:50%;border:1.5px solid var(--color-divider)}
+.radio:hover .dot{border-color:var(--color-accent)}
+.radio input:checked+.dot{border-color:var(--color-accent);background:var(--color-accent);box-shadow:inset 0 0 0 4px var(--color-bg)}
+/* the native input is visually hidden (0×0, opacity 0) so its own outline
+   would be invisible — move the focus ring onto the visible dot instead */
+.radio input:focus-visible+.dot{outline:2px solid var(--color-accent);outline-offset:2px}
+.seg{display:inline-flex;overflow:hidden;border:1px solid var(--color-divider);border-radius:8px;background:#fff}
+.seg-opt{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;font-size:13px;cursor:pointer}
+.seg-opt+.seg-opt{border-left:1px solid var(--color-divider)}
+.seg-opt input{position:absolute;opacity:0;width:0;height:0;pointer-events:none}
+.seg-opt:has(input:checked){background:var(--color-accent);color:#fff}
+.seg-opt:not(:has(input:checked)):hover{background:color-mix(in srgb,var(--color-text) 7%,transparent)}
+.seg-opt:has(input:focus-visible){outline:2px solid var(--color-accent);outline-offset:-2px}
+.error-list{color:var(--color-alert-ink);font-size:12px;margin:2px 0 0;padding-left:16px}
+
+/* — cards — */
+.card{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-3);border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--color-text) 8%,transparent);background:#fff}
+.card-kicker{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700}
+.card-title{font-family:var(--font-heading);font-weight:700;font-size:17px;line-height:1.2}
+.card-body{margin:0;font-size:13px;opacity:.8;flex:1}
+.card-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:color-mix(in srgb,var(--color-text) 50%,transparent)}
+.elev-sm{box-shadow:var(--shadow-sm)}
+.elev-md{box-shadow:var(--shadow-md)}
+.elev-lg{box-shadow:var(--shadow-lg)}
+
+/* — tags — */
+.tag{display:inline-flex;align-items:center;font-size:11px;font-weight:600;letter-spacing:.02em;padding:3px 8px;border-radius:6px}
+.tag-accent{background:var(--color-accent-100);color:var(--color-accent-800)}
+.tag-accent-2{background:var(--color-accent-2-100);color:var(--color-accent-2-800)}
+.tag-neutral{background:var(--color-neutral-100);color:var(--color-neutral-800)}
+.tag-outline{border:1px solid var(--color-accent);color:var(--color-accent)}
+.tag-alert{background:var(--color-alert-tint);color:var(--color-alert-ink)}
+/* three status signals used across the queue/scorecard: on time (green),
+   due soon (ocre), error/overdue (brick) */
+.tag-on-time{background:var(--color-accent-200);color:var(--color-accent-800)}
+.tag-due-soon{background:var(--color-accent-2-200);color:var(--color-accent-2-800)}
+.tag-overdue{background:var(--color-accent-2-500);color:#fff}
+.tag-error{background:var(--color-alert);color:#fff}
+/* categorical labels (row "type", not row "urgency") get an outline instead
+   of a fill, so they never read as a due-soon/overdue signal at a glance —
+   the accent-2 fills above are reserved for time-urgency exclusively */
+.tag-type{background:transparent;border:1px solid var(--color-divider);color:var(--color-text);font-weight:600}
+
+/* — navigation — */
+.nvi{padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;color:var(--color-text);text-decoration:none;display:block}
+.nvi:hover{background:rgba(4,102,72,.08)}
+.nvi[aria-current='page']{background:var(--color-accent);color:#fff}
+.brandmark{height:26px;width:auto;align-self:flex-start;object-fit:contain;display:block}
+
+/* — tables — */
+.table{width:100%;border-collapse:collapse;font-size:14px}
+.table th{text-align:left;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:color-mix(in srgb,var(--color-text) 60%,transparent);padding:var(--space-2);border-bottom:1px solid var(--color-divider)}
+.table td{padding:var(--space-2);border-bottom:1px solid color-mix(in srgb,var(--color-text) 8%,transparent)}
+.table tbody tr:hover{background:color-mix(in srgb,var(--color-text) 4%,transparent)}
+
+/* — dialog — */
+.dialog-backdrop{position:fixed;inset:0;display:grid;place-items:center;padding:var(--space-4);
+  background:color-mix(in srgb,var(--color-neutral-900) 50%,transparent)}
+.dialog{width:min(440px,100%);display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-4);
+  border-radius:14px;background:#fff;box-shadow:var(--shadow-lg)}
+
+/* — app shell — */
+.app-shell{display:flex;min-height:100vh}
+.app-sidebar{width:200px;flex:none;background:var(--color-surface);border-right:1px solid var(--color-divider);
+  padding:var(--space-4) var(--space-3);display:flex;flex-direction:column;gap:var(--space-6);position:sticky;top:0;height:100vh}
+.app-main{flex:1;padding:var(--space-6) var(--space-8) var(--space-8);min-width:0}
+
+/* — public shell —
+   Outside requesters and warehouse staff see these screens once, often from
+   a phone at a loading dock; the assistant lives in the app-shell above all
+   day. So the public side gets the bolder, branded treatment (deep Irritec
+   green field, the form as a lifted white panel) while the workspace stays
+   quiet and neutral for long-session reading. */
+.public-shell{min-height:100vh;display:flex;align-items:flex-start;justify-content:center;
+  padding:56px 24px;background:
+    radial-gradient(1100px 520px at 85% -10%, color-mix(in srgb,var(--color-accent-600) 55%,transparent), transparent),
+    var(--color-accent-900)}
+.public-card{width:100%;max-width:820px;margin:0;padding:36px 44px 44px;background:#fff;
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-lg)}
+.public-card--narrow{max-width:660px;padding:36px 40px 44px}
+
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-3);margin:var(--space-6) 0}
+.stat-grid--3{grid-template-columns:repeat(3,1fr)}
+.stat-number{font-family:var(--font-heading);font-size:30px}
+
+/* — form layout (was inline styles; needs classes so it can respond) — */
+.form-row-2{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-4)}
+.item-row{display:grid;grid-template-columns:1fr 88px 120px auto;gap:var(--space-2);align-items:end;
+  background:var(--color-surface);padding:var(--space-3);border-radius:var(--radius-lg)}
+.choice-row{display:flex;flex-wrap:wrap;gap:var(--space-4)}
+.submit-row{display:flex;align-items:center;gap:var(--space-4)}
+
+/* — sequence stepper — used only where the content is a genuine, ordered
+   process (purchase request lifecycle); distinguishes done/current/upcoming
+   instead of only ever highlighting the active step. */
+.stepper{display:flex;gap:0;background:var(--color-surface);border-radius:999px;padding:6px}
+.stepper-seg{flex:1;text-align:center;padding:9px;border-radius:8px;font-size:13px}
+.stepper-seg--current{background:var(--color-accent);color:#fff;font-weight:700}
+.stepper-seg--done{color:var(--color-accent-700);font-weight:700}
+.stepper-seg--upcoming{color:color-mix(in srgb,var(--color-text) 45%,transparent)}
+
+/* — attainment gauge —
+   The one deliberate signature: rendered as a drip line rather than a plain
+   SaaS progress pill — the filled run carries an even perforation, and the
+   threshold/target are actual emitters seated at their true position on the
+   line, not evenly-spaced labels that lied about where 70/90% actually are. */
+.gauge-track{position:relative;height:16px;border-radius:999px;background:var(--color-neutral-400);overflow:hidden}
+.gauge-fill{height:100%;border-radius:999px;background:
+    repeating-linear-gradient(to right,
+      color-mix(in srgb,#fff 32%,var(--color-accent)) 0 3px,
+      var(--color-accent) 3px 15px);
+  transition:width var(--transition-base)}
+.gauge-mark{position:absolute;top:50%;width:9px;height:9px;border-radius:999px;
+  background:#fff;border:2px solid var(--color-accent-700);transform:translate(-50%,-50%)}
+.gauge-scale{position:relative;height:14px;margin-top:8px;font-size:11px}
+.gauge-scale span{color:color-mix(in srgb,var(--color-text) 55%,transparent)}
+.gauge-scale .gauge-scale-end{position:absolute;top:0}
+.gauge-scale .gauge-scale-end--start{left:0}
+.gauge-scale .gauge-scale-end--end{right:0}
+.gauge-scale .gauge-scale-mark{position:absolute;top:0;transform:translateX(-50%);white-space:nowrap}
+
+.table-scroll{overflow-x:auto}
+
+@media (max-width:640px){
+  .public-shell{padding:0}
+  .public-card,.public-card--narrow{max-width:none;min-height:100vh;padding:28px 20px 32px;border-radius:0;box-shadow:none}
+  .form-row-2,.item-row{grid-template-columns:1fr}
+  .item-row{gap:var(--space-3)}
+  .choice-row{flex-direction:column;gap:var(--space-3)}
+  .submit-row{flex-direction:column;align-items:stretch;text-align:center}
+  .submit-row .btn{width:100%}
+  .stat-grid,.stat-grid--3{grid-template-columns:1fr 1fr}
+}
