@@ -4,24 +4,41 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('tracker', '0007_supplierquote_quote_pdf_alter_supplierquote_currency_and_more'),
+        (
+            "tracker",
+            "0007_supplierquote_quote_pdf_alter_supplierquote_currency_and_more",
+        ),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='purchaserequest',
-            name='quoting_started_at',
+            model_name="purchaserequest",
+            name="quoting_started_at",
         ),
         migrations.AddField(
-            model_name='purchaserequest',
-            name='quotes_sent_at',
-            field=models.DateTimeField(blank=True, help_text='Cuándo se le enviaron al solicitante las cotizaciones recopiladas para su confirmación.', null=True),
+            model_name="purchaserequest",
+            name="quotes_sent_at",
+            field=models.DateTimeField(
+                blank=True,
+                help_text="Cuándo se le enviaron al solicitante las cotizaciones recopiladas para su confirmación.",
+                null=True,
+            ),
         ),
         migrations.AlterField(
-            model_name='purchaserequest',
-            name='status',
-            field=models.CharField(choices=[('requested', 'Solicitada'), ('quoting', 'Cotizando'), ('awaiting_confirmation', 'Esperando confirmación'), ('po_issued', 'Orden de compra emitida'), ('closed', 'Cerrada'), ('cancelled', 'Cancelada')], default='requested', max_length=25),
+            model_name="purchaserequest",
+            name="status",
+            field=models.CharField(
+                choices=[
+                    ("requested", "Solicitada"),
+                    ("quoting", "Cotizando"),
+                    ("awaiting_confirmation", "Esperando confirmación"),
+                    ("po_issued", "Orden de compra emitida"),
+                    ("closed", "Cerrada"),
+                    ("cancelled", "Cancelada"),
+                ],
+                default="requested",
+                max_length=25,
+            ),
         ),
     ]

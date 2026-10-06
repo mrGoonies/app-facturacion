@@ -5,15 +5,20 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('tracker', '0003_purchaserequest_reference_image'),
+        ("tracker", "0003_purchaserequest_reference_image"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='purchaserequestitem',
-            name='reference_image',
-            field=cloudinary.models.CloudinaryField(blank=True, help_text='Foto de referencia de este artículo (opcional).', max_length=255, null=True, verbose_name='imagen'),
+            model_name="purchaserequestitem",
+            name="reference_image",
+            field=cloudinary.models.CloudinaryField(
+                blank=True,
+                help_text="Foto de referencia de este artículo (opcional).",
+                max_length=255,
+                null=True,
+                verbose_name="imagen",
+            ),
         ),
     ]

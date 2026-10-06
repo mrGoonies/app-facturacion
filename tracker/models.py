@@ -34,24 +34,35 @@ class PurchaseRequest(models.Model):
     department = models.CharField(max_length=120)
     needed_by = models.DateField()
     justification = models.TextField(blank=True, verbose_name="¿Para qué se necesita?")
-    urgency = models.CharField(max_length=20, choices=Urgency.choices, default=Urgency.STANDARD)
+    urgency = models.CharField(
+        max_length=20, choices=Urgency.choices, default=Urgency.STANDARD
+    )
     reference_image = CloudinaryField(
-        "imagen", folder="purchase_requests", blank=True, null=True,
+        "imagen",
+        folder="purchase_requests",
+        blank=True,
+        null=True,
         help_text="Foto de referencia del artículo o la necesidad (opcional).",
     )
 
-    status = models.CharField(max_length=25, choices=Status.choices, default=Status.REQUESTED)
+    status = models.CharField(
+        max_length=25, choices=Status.choices, default=Status.REQUESTED
+    )
     po_number = models.CharField(max_length=40, blank=True)
 
     handled_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="purchase_requests_handled",
         help_text="La asistente que emitió la orden de compra — cuenta para su KPI.",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
     quotes_sent_at = models.DateTimeField(
-        null=True, blank=True,
+        null=True,
+        blank=True,
         help_text="Cuándo se le enviaron al solicitante las cotizaciones recopiladas para su confirmación.",
     )
     po_issued_at = models.DateTimeField(null=True, blank=True)
@@ -115,7 +126,9 @@ class PurchaseRequest(models.Model):
         order = [key for key, _ in self.STATUS_STEPS]
         # `requested` isn't one of the visible steps — treat it as the start
         # of "Cotizando" rather than leaving the whole stepper unhighlighted.
-        effective_status = self.Status.QUOTING if self.status == self.Status.REQUESTED else self.status
+        effective_status = (
+            self.Status.QUOTING if self.status == self.Status.REQUESTED else self.status
+        )
         try:
             current_index = order.index(effective_status)
         except ValueError:
@@ -133,12 +146,17 @@ class PurchaseRequest(models.Model):
 
 
 class PurchaseRequestItem(models.Model):
-    request = models.ForeignKey(PurchaseRequest, related_name="items", on_delete=models.CASCADE)
+    request = models.ForeignKey(
+        PurchaseRequest, related_name="items", on_delete=models.CASCADE
+    )
     description = models.CharField(max_length=255)
     quantity = models.PositiveIntegerField()
     unit = models.CharField(max_length=40, blank=True)
     reference_image = CloudinaryField(
-        "imagen", folder="purchase_request_items", blank=True, null=True,
+        "imagen",
+        folder="purchase_request_items",
+        blank=True,
+        null=True,
         help_text="Foto de referencia de este artículo (opcional).",
     )
 
@@ -147,17 +165,24 @@ class PurchaseRequestItem(models.Model):
 
 
 class SupplierQuote(models.Model):
-    request = models.ForeignKey(PurchaseRequest, related_name="quotes", on_delete=models.CASCADE)
+    request = models.ForeignKey(
+        PurchaseRequest, related_name="quotes", on_delete=models.CASCADE
+    )
     supplier_name = models.CharField(max_length=150)
     quote_pdf = CloudinaryField(
-        "documento", resource_type="raw", folder="supplier_quotes", null=True,
+        "documento",
+        resource_type="raw",
+        folder="supplier_quotes",
+        null=True,
         help_text="PDF de la cotización del proveedor.",
     )
     # Optional now that the PDF is the source of truth — kept for the
     # side-by-side comparison table, filled in only if the assistant wants
     # a quick read of the totals without opening every PDF. Nullable at the
     # DB level for quotes logged before quote_pdf existed.
-    total_amount = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+    total_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, blank=True, null=True
+    )
     currency = models.CharField(max_length=8, default="MXN", blank=True)
     lead_time_days = models.PositiveIntegerField(blank=True, null=True)
     payment_terms = models.CharField(max_length=80, blank=True)
@@ -175,7 +200,9 @@ class PurchaseActivity(models.Model):
     """Timeline entries shown on the purchase detail and requester status
     pages (design screens 1d/1f)."""
 
-    request = models.ForeignKey(PurchaseRequest, related_name="activities", on_delete=models.CASCADE)
+    request = models.ForeignKey(
+        PurchaseRequest, related_name="activities", on_delete=models.CASCADE
+    )
     message = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -210,7 +237,9 @@ class PickingListBatch(models.Model):
 
     @property
     def avg_time_to_invoice(self):
-        durations = [l.hand_off_to_invoice for l in self.lists.all() if l.hand_off_to_invoice]
+        durations = [
+            l.hand_off_to_invoice for l in self.lists.all() if l.hand_off_to_invoice
+        ]
         if not durations:
             return None
         return sum(durations, timezone.timedelta()) / len(durations)
@@ -225,16 +254,23 @@ class PickingList(models.Model):
         CORRECTED = "corrected", "Corregida"
 
     number = models.CharField(max_length=20, unique=True)
-    batch = models.ForeignKey(PickingListBatch, related_name="lists", on_delete=models.CASCADE)
+    batch = models.ForeignKey(
+        PickingListBatch, related_name="lists", on_delete=models.CASCADE
+    )
 
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.NOT_STARTED)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.NOT_STARTED
+    )
     handed_off_at = models.DateTimeField()
     in_process_at = models.DateTimeField(null=True, blank=True)
     invoice_number = models.CharField(max_length=40, blank=True)
     invoiced_at = models.DateTimeField(null=True, blank=True)
 
     handled_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL,
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="picking_lists_handled",
         help_text="La asistente que procesó esta lista — cuenta para su KPI.",
     )
@@ -292,7 +328,9 @@ class BillingError(models.Model):
         LOGISTICS = "logistics", "Datos de logística"
         CUSTOMER = "customer", "Datos maestros del cliente"
 
-    picking_list = models.ForeignKey(PickingList, related_name="errors", on_delete=models.CASCADE)
+    picking_list = models.ForeignKey(
+        PickingList, related_name="errors", on_delete=models.CASCADE
+    )
     invoice_number = models.CharField(max_length=40, blank=True)
     error_type = models.CharField(max_length=150)
     attributable_to = models.CharField(max_length=20, choices=Attributable.choices)

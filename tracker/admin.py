@@ -1,8 +1,13 @@
 from django.contrib import admin
 
 from .models import (
-    BillingError, PickingList, PickingListBatch, PurchaseActivity,
-    PurchaseRequest, PurchaseRequestItem, SupplierQuote,
+    BillingError,
+    PickingList,
+    PickingListBatch,
+    PurchaseActivity,
+    PurchaseRequest,
+    PurchaseRequestItem,
+    SupplierQuote,
 )
 
 
@@ -18,7 +23,14 @@ class SupplierQuoteInline(admin.TabularInline):
 
 @admin.register(PurchaseRequest)
 class PurchaseRequestAdmin(admin.ModelAdmin):
-    list_display = ["display_ref", "requester_name", "department", "status", "created_at", "handled_by"]
+    list_display = [
+        "display_ref",
+        "requester_name",
+        "department",
+        "status",
+        "created_at",
+        "handled_by",
+    ]
     list_filter = ["status", "urgency"]
     inlines = [PurchaseRequestItemInline, SupplierQuoteInline]
 
@@ -41,7 +53,14 @@ class BillingErrorInline(admin.TabularInline):
 
 @admin.register(PickingList)
 class PickingListAdmin(admin.ModelAdmin):
-    list_display = ["number", "batch", "status", "handed_off_at", "invoiced_at", "handled_by"]
+    list_display = [
+        "number",
+        "batch",
+        "status",
+        "handed_off_at",
+        "invoiced_at",
+        "handled_by",
+    ]
     list_filter = ["status"]
     inlines = [BillingErrorInline]
 

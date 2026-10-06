@@ -4,7 +4,13 @@ from django import forms
 from django.contrib.auth.forms import AuthenticationForm
 from django.forms import inlineformset_factory
 
-from .models import BillingError, PickingListBatch, PurchaseRequest, PurchaseRequestItem, SupplierQuote
+from .models import (
+    BillingError,
+    PickingListBatch,
+    PurchaseRequest,
+    PurchaseRequestItem,
+    SupplierQuote,
+)
 
 PL_NUMBER_RE = re.compile(r"[A-Za-z]*-?\d+")
 
@@ -29,8 +35,13 @@ class StyledFormMixin:
     so templates can just `{{ form.field }}` without repeating widget attrs."""
 
     TEXT_WIDGETS = (
-        forms.TextInput, forms.EmailInput, forms.NumberInput,
-        forms.DateInput, forms.Textarea, forms.URLInput, forms.PasswordInput,
+        forms.TextInput,
+        forms.EmailInput,
+        forms.NumberInput,
+        forms.DateInput,
+        forms.Textarea,
+        forms.URLInput,
+        forms.PasswordInput,
     )
 
     def __init__(self, *args, **kwargs):
@@ -51,8 +62,13 @@ class PurchaseRequestForm(StyledFormMixin, forms.ModelForm):
     class Meta:
         model = PurchaseRequest
         fields = [
-            "requester_name", "requester_email", "department", "needed_by",
-            "justification", "urgency", "reference_image",
+            "requester_name",
+            "requester_email",
+            "department",
+            "needed_by",
+            "justification",
+            "urgency",
+            "reference_image",
         ]
         widgets = {
             "justification": forms.Textarea(attrs={"rows": 3}),
@@ -62,12 +78,17 @@ class PurchaseRequestForm(StyledFormMixin, forms.ModelForm):
 
 class PurchaseRequestItemForm(StyledFormMixin, forms.ModelForm):
     unit = forms.ChoiceField(
-        choices=UNIT_CHOICES, required=False, label="Unidad",
+        choices=UNIT_CHOICES,
+        required=False,
+        label="Unidad",
         widget=forms.Select(attrs={"class": "input"}),
     )
     unit_other = forms.CharField(
-        required=False, label="Especifica la unidad",
-        widget=forms.TextInput(attrs={"class": "input", "placeholder": "Escribe la unidad"}),
+        required=False,
+        label="Especifica la unidad",
+        widget=forms.TextInput(
+            attrs={"class": "input", "placeholder": "Escribe la unidad"}
+        ),
     )
 
     class Meta:
@@ -75,7 +96,9 @@ class PurchaseRequestItemForm(StyledFormMixin, forms.ModelForm):
         fields = ["description", "quantity", "unit", "reference_image"]
         widgets = {
             "description": forms.TextInput(attrs={"class": "input"}),
-            "quantity": forms.NumberInput(attrs={"class": "input", "step": "1", "min": "1"}),
+            "quantity": forms.NumberInput(
+                attrs={"class": "input", "step": "1", "min": "1"}
+            ),
         }
 
     def __init__(self, *args, **kwargs):
@@ -112,7 +135,9 @@ PurchaseRequestItemFormSet = inlineformset_factory(
 class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
     shipped_on = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
     list_numbers = forms.CharField(
-        widget=forms.Textarea(attrs={"rows": 2, "placeholder": "PL-8836, PL-8837, PL-8838 …"}),
+        widget=forms.Textarea(
+            attrs={"rows": 2, "placeholder": "PL-8836, PL-8837, PL-8838 …"}
+        ),
         help_text="Separa los números de lista con comas, espacios o saltos de línea.",
     )
 
@@ -124,7 +149,9 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
         raw = self.cleaned_data["list_numbers"]
         numbers = [n.upper() for n in PL_NUMBER_RE.findall(raw)]
         if not numbers:
-            raise forms.ValidationError("Ingresa al menos un número de lista de picking.")
+            raise forms.ValidationError(
+                "Ingresa al menos un número de lista de picking."
+            )
         seen, deduped = set(), []
         for n in numbers:
             if n not in seen:
@@ -136,7 +163,14 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
 class SupplierQuoteForm(StyledFormMixin, forms.ModelForm):
     class Meta:
         model = SupplierQuote
-        fields = ["supplier_name", "quote_pdf", "total_amount", "currency", "lead_time_days", "payment_terms"]
+        fields = [
+            "supplier_name",
+            "quote_pdf",
+            "total_amount",
+            "currency",
+            "lead_time_days",
+            "payment_terms",
+        ]
 
     def clean_quote_pdf(self):
         pdf = self.cleaned_data.get("quote_pdf")
@@ -158,7 +192,13 @@ class BillingErrorForm(StyledFormMixin, forms.ModelForm):
 
     class Meta:
         model = BillingError
-        fields = ["invoice_number", "error_type", "attributable_to", "reported_by", "description"]
+        fields = [
+            "invoice_number",
+            "error_type",
+            "attributable_to",
+            "reported_by",
+            "description",
+        ]
         widgets = {
             "description": forms.Textarea(attrs={"rows": 3}),
         }

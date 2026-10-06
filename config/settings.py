@@ -17,7 +17,9 @@ SECRET_KEY = config(
 
 DEBUG = config("DJANGO_DEBUG", default=True, cast=bool)
 
-ALLOWED_HOSTS = config("DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1", cast=Csv())
+ALLOWED_HOSTS = config(
+    "DJANGO_ALLOWED_HOSTS", default="localhost,127.0.0.1", cast=Csv()
+)
 CSRF_TRUSTED_ORIGINS = config("DJANGO_CSRF_TRUSTED_ORIGINS", default="", cast=Csv())
 
 # Render sets this automatically for every service — trust it without
@@ -41,68 +43,68 @@ if not DEBUG:
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
     # staticfiles before cloudinary_storage: we want Django's own collectstatic
     # (paired with WhiteNoise below), not cloudinary_storage's override, which
     # also assumes the pre-4.2 STATICFILES_STORAGE setting and errors under
     # the STORAGES dict this project uses.
-    'django.contrib.staticfiles',
-    'cloudinary_storage',
-    'cloudinary',
-    'django.contrib.humanize',
-    'anymail',
-    'tracker',
+    "django.contrib.staticfiles",
+    "cloudinary_storage",
+    "cloudinary",
+    "django.contrib.humanize",
+    "anymail",
+    "tracker",
 ]
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'config.urls'
+ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'config.wsgi.application'
+WSGI_APPLICATION = "config.wsgi.application"
 
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
     }
 }
 
 # Render's managed Postgres is provisioned as a single DATABASE_URL — when
 # it's set (i.e. on Render), it replaces the local SQLite database above.
-if config('DATABASE_URL', default=''):
-    DATABASES['default'] = dj_database_url.config(conn_max_age=600, ssl_require=True)
+if config("DATABASE_URL", default=""):
+    DATABASES["default"] = dj_database_url.config(conn_max_age=600, ssl_require=True)
 
 
 # Password validation
@@ -110,16 +112,16 @@ if config('DATABASE_URL', default=''):
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -127,9 +129,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
-LANGUAGE_CODE = 'es-cl'
+LANGUAGE_CODE = "es-cl"
 
-TIME_ZONE = 'America/Santiago'
+TIME_ZONE = "America/Santiago"
 
 USE_I18N = True
 
@@ -139,9 +141,9 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_URL = "static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # User-uploaded files (purchase request reference images) go to Cloudinary;
 # static assets (CSS/logo) are served straight off the web dyno by
@@ -162,34 +164,36 @@ CLOUDINARY_STORAGE = {
     "API_SECRET": config("CLOUDINARY_API_SECRET", default=""),
 }
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LOGIN_URL = 'tracker:login'
-LOGIN_REDIRECT_URL = 'tracker:queue'
-LOGOUT_REDIRECT_URL = 'tracker:login'
+LOGIN_URL = "tracker:login"
+LOGIN_REDIRECT_URL = "tracker:queue"
+LOGOUT_REDIRECT_URL = "tracker:login"
 
 
 # Email — console backend by default so nothing needs configuring locally
 # (see tracker/emails.py for what gets sent). Set DJANGO_EMAIL_BACKEND and
 # MAILCHIMP_API_KEY below to send real mail through Mailchimp Transactional.
 EMAIL_BACKEND = config(
-    'DJANGO_EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend'
+    "DJANGO_EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
 )
 DEFAULT_FROM_EMAIL = config(
-    'DEFAULT_FROM_EMAIL', default='Irritec Seguimiento <no-reply@irritec.local>'
+    "DEFAULT_FROM_EMAIL", default="Irritec Seguimiento <no-reply@irritec.local>"
 )
 
 # Used to build absolute links (status page, panel links) inside emails.
 SITE_URL = config(
-    'SITE_URL',
-    default=f'https://{RENDER_EXTERNAL_HOSTNAME}' if RENDER_EXTERNAL_HOSTNAME else 'http://127.0.0.1:8080',
+    "SITE_URL",
+    default=f"https://{RENDER_EXTERNAL_HOSTNAME}"
+    if RENDER_EXTERNAL_HOSTNAME
+    else "http://127.0.0.1:8080",
 )
 
 # Mailchimp Transactional (formerly Mandrill — same API, django-anymail keeps
 # the historical "mandrill" backend/setting names). Only used when
 # EMAIL_BACKEND is set to 'anymail.backends.mandrill.EmailBackend'.
 ANYMAIL = {
-    'MANDRILL_API_KEY': config('MAILCHIMP_API_KEY', default=''),
+    "MANDRILL_API_KEY": config("MAILCHIMP_API_KEY", default=""),
 }
 
 
@@ -198,15 +202,25 @@ ANYMAIL = {
 # bonus) are configurable without touching code.
 KPI_SETTINGS = {
     "PO_TARGET_HOURS": config("KPI_PO_TARGET_HOURS", default=48, cast=int),
-    "IN_PROCESS_TARGET_HOURS": config("KPI_IN_PROCESS_TARGET_HOURS", default=2, cast=int),
+    "IN_PROCESS_TARGET_HOURS": config(
+        "KPI_IN_PROCESS_TARGET_HOURS", default=2, cast=int
+    ),
     "INVOICE_TARGET_HOURS": config("KPI_INVOICE_TARGET_HOURS", default=8, cast=int),
     "ERROR_RATE_TARGET": config("KPI_ERROR_RATE_TARGET", default=0.02, cast=float),
     "PO_ON_TIME_TARGET": config("KPI_PO_ON_TIME_TARGET", default=0.90, cast=float),
-    "IN_PROCESS_ON_TIME_TARGET": config("KPI_IN_PROCESS_ON_TIME_TARGET", default=0.95, cast=float),
-    "INVOICE_ON_TIME_TARGET": config("KPI_INVOICE_ON_TIME_TARGET", default=0.90, cast=float),
+    "IN_PROCESS_ON_TIME_TARGET": config(
+        "KPI_IN_PROCESS_ON_TIME_TARGET", default=0.95, cast=float
+    ),
+    "INVOICE_ON_TIME_TARGET": config(
+        "KPI_INVOICE_ON_TIME_TARGET", default=0.90, cast=float
+    ),
     "WEIGHT_PO_ON_TIME": config("KPI_WEIGHT_PO_ON_TIME", default=0.30, cast=float),
-    "WEIGHT_IN_PROCESS_ON_TIME": config("KPI_WEIGHT_IN_PROCESS_ON_TIME", default=0.20, cast=float),
-    "WEIGHT_INVOICE_ON_TIME": config("KPI_WEIGHT_INVOICE_ON_TIME", default=0.25, cast=float),
+    "WEIGHT_IN_PROCESS_ON_TIME": config(
+        "KPI_WEIGHT_IN_PROCESS_ON_TIME", default=0.20, cast=float
+    ),
+    "WEIGHT_INVOICE_ON_TIME": config(
+        "KPI_WEIGHT_INVOICE_ON_TIME", default=0.25, cast=float
+    ),
     "WEIGHT_ERROR_RATE": config("KPI_WEIGHT_ERROR_RATE", default=0.25, cast=float),
     "BONUS_THRESHOLD": config("KPI_BONUS_THRESHOLD", default=0.70, cast=float),
     # Aspirational mark on the attainment gauge itself — distinct from the

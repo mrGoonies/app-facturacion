@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('tracker', '0004_purchaserequestitem_reference_image'),
+        ("tracker", "0004_purchaserequestitem_reference_image"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='purchaserequestitem',
-            name='quantity',
+            model_name="purchaserequestitem",
+            name="quantity",
             field=models.PositiveIntegerField(),
         ),
     ]

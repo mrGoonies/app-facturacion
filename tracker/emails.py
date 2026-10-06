@@ -16,14 +16,25 @@ def _absolute_url(path: str) -> str:
 
 
 def _items_summary(pr) -> str:
-    return "\n".join(f"- {item.quantity} {item.unit} {item.description}".strip() for item in pr.items.all())
+    return "\n".join(
+        f"- {item.quantity} {item.unit} {item.description}".strip()
+        for item in pr.items.all()
+    )
 
 
 def _quotes_summary(pr) -> str:
     lines = []
     for q in pr.quotes.all():
-        total = f"{q.currency} {q.total_amount:,.2f}" if q.total_amount else "monto no capturado"
-        lead = f"entrega en {q.lead_time_days} días" if q.lead_time_days else "tiempo de entrega no capturado"
+        total = (
+            f"{q.currency} {q.total_amount:,.2f}"
+            if q.total_amount
+            else "monto no capturado"
+        )
+        lead = (
+            f"entrega en {q.lead_time_days} días"
+            if q.lead_time_days
+            else "tiempo de entrega no capturado"
+        )
         line = f"- {q.supplier_name} — {total}, {lead}"
         if q.quote_pdf:
             line += f"\n  Ver cotización (PDF): {q.quote_pdf.url}"
@@ -48,8 +59,8 @@ def send_purchase_request_created_emails(pr):
     )
 
     staff_emails = list(
-        get_user_model().objects
-        .filter(is_staff=True, is_active=True)
+        get_user_model()
+        .objects.filter(is_staff=True, is_active=True)
         .exclude(email="")
         .values_list("email", flat=True)
     )

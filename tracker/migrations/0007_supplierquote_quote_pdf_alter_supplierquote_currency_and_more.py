@@ -5,30 +5,36 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('tracker', '0006_remove_pickinglist_customer_route_and_more'),
+        ("tracker", "0006_remove_pickinglist_customer_route_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='supplierquote',
-            name='quote_pdf',
-            field=cloudinary.models.CloudinaryField(help_text='PDF de la cotización del proveedor.', max_length=255, null=True, verbose_name='documento'),
+            model_name="supplierquote",
+            name="quote_pdf",
+            field=cloudinary.models.CloudinaryField(
+                help_text="PDF de la cotización del proveedor.",
+                max_length=255,
+                null=True,
+                verbose_name="documento",
+            ),
         ),
         migrations.AlterField(
-            model_name='supplierquote',
-            name='currency',
-            field=models.CharField(blank=True, default='MXN', max_length=8),
+            model_name="supplierquote",
+            name="currency",
+            field=models.CharField(blank=True, default="MXN", max_length=8),
         ),
         migrations.AlterField(
-            model_name='supplierquote',
-            name='lead_time_days',
+            model_name="supplierquote",
+            name="lead_time_days",
             field=models.PositiveIntegerField(blank=True, null=True),
         ),
         migrations.AlterField(
-            model_name='supplierquote',
-            name='total_amount',
-            field=models.DecimalField(blank=True, decimal_places=2, max_digits=12, null=True),
+            model_name="supplierquote",
+            name="total_amount",
+            field=models.DecimalField(
+                blank=True, decimal_places=2, max_digits=12, null=True
+            ),
         ),
     ]

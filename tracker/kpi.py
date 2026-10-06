@@ -52,6 +52,7 @@ class Scorecard:
     @property
     def month_label(self):
         from django.utils.dates import MONTHS
+
         return f"{str(MONTHS[self.month]).capitalize()} {self.year}"
 
     @property
@@ -90,12 +91,16 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
         requests_qs = requests_qs.filter(handled_by=user)
     requests = list(requests_qs)
 
-    po_hours = [(r.po_issued_at - r.created_at).total_seconds() / 3600 for r in requests]
+    po_hours = [
+        (r.po_issued_at - r.created_at).total_seconds() / 3600 for r in requests
+    ]
     po_on_time_flags = [r.is_po_on_time for r in requests]
     avg_po_hours = sum(po_hours) / len(po_hours) if po_hours else None
     po_on_time_rate = _on_time_rate(po_on_time_flags)
 
-    lists_qs = PickingList.objects.filter(handed_off_at__range=(start, end)).select_related("batch")
+    lists_qs = PickingList.objects.filter(
+        handed_off_at__range=(start, end)
+    ).select_related("batch")
     if user is not None:
         lists_qs = lists_qs.filter(handled_by=user)
     lists = list(lists_qs)
@@ -107,8 +112,10 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
     invoiced_lists = [l for l in lists if l.hand_off_to_invoice is not None]
     invoice_on_time_rate = _on_time_rate([l.is_invoice_on_time for l in invoiced_lists])
     avg_invoice_hours = (
-        sum(l.hand_off_to_invoice.total_seconds() / 3600 for l in invoiced_lists) / len(invoiced_lists)
-        if invoiced_lists else None
+        sum(l.hand_off_to_invoice.total_seconds() / 3600 for l in invoiced_lists)
+        / len(invoiced_lists)
+        if invoiced_lists
+        else None
     )
 
     errors_qs = BillingError.objects.filter(
@@ -123,23 +130,39 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
         IndicatorScore(
             label=f"Orden de compra emitida dentro de {cfg['PO_TARGET_HOURS']} h desde la solicitud",
             target_label=f"≥ {cfg['PO_ON_TIME_TARGET']:.0%} a tiempo",
-            actual_label=f"{po_on_time_rate:.0%}" if po_on_time_rate is not None else "—",
+            actual_label=f"{po_on_time_rate:.0%}"
+            if po_on_time_rate is not None
+            else "—",
             weight=cfg["WEIGHT_PO_ON_TIME"] * 100,
-            score=_on_time_score(po_on_time_rate, cfg["PO_ON_TIME_TARGET"], cfg["WEIGHT_PO_ON_TIME"]),
+            score=_on_time_score(
+                po_on_time_rate, cfg["PO_ON_TIME_TARGET"], cfg["WEIGHT_PO_ON_TIME"]
+            ),
         ),
         IndicatorScore(
             label=f"Lista de picking marcada En proceso dentro de {cfg['IN_PROCESS_TARGET_HOURS']} h desde la entrega",
             target_label=f"≥ {cfg['IN_PROCESS_ON_TIME_TARGET']:.0%} a tiempo",
-            actual_label=f"{in_process_on_time_rate:.0%}" if in_process_on_time_rate is not None else "—",
+            actual_label=f"{in_process_on_time_rate:.0%}"
+            if in_process_on_time_rate is not None
+            else "—",
             weight=cfg["WEIGHT_IN_PROCESS_ON_TIME"] * 100,
-            score=_on_time_score(in_process_on_time_rate, cfg["IN_PROCESS_ON_TIME_TARGET"], cfg["WEIGHT_IN_PROCESS_ON_TIME"]),
+            score=_on_time_score(
+                in_process_on_time_rate,
+                cfg["IN_PROCESS_ON_TIME_TARGET"],
+                cfg["WEIGHT_IN_PROCESS_ON_TIME"],
+            ),
         ),
         IndicatorScore(
             label=f"Factura emitida dentro de {cfg['INVOICE_TARGET_HOURS']} h desde la entrega",
             target_label=f"≥ {cfg['INVOICE_ON_TIME_TARGET']:.0%} a tiempo",
-            actual_label=f"{invoice_on_time_rate:.0%}" if invoice_on_time_rate is not None else "—",
+            actual_label=f"{invoice_on_time_rate:.0%}"
+            if invoice_on_time_rate is not None
+            else "—",
             weight=cfg["WEIGHT_INVOICE_ON_TIME"] * 100,
-            score=_on_time_score(invoice_on_time_rate, cfg["INVOICE_ON_TIME_TARGET"], cfg["WEIGHT_INVOICE_ON_TIME"]),
+            score=_on_time_score(
+                invoice_on_time_rate,
+                cfg["INVOICE_ON_TIME_TARGET"],
+                cfg["WEIGHT_INVOICE_ON_TIME"],
+            ),
         ),
     ]
 
@@ -147,15 +170,21 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
         err_score = cfg["WEIGHT_ERROR_RATE"] * 100
     else:
         overshoot = max(0.0, error_rate - cfg["ERROR_RATE_TARGET"])
-        penalty_ratio = min(1.0, overshoot / cfg["ERROR_RATE_TARGET"]) if cfg["ERROR_RATE_TARGET"] else 0
+        penalty_ratio = (
+            min(1.0, overshoot / cfg["ERROR_RATE_TARGET"])
+            if cfg["ERROR_RATE_TARGET"]
+            else 0
+        )
         err_score = (1 - penalty_ratio) * cfg["WEIGHT_ERROR_RATE"] * 100
-    indicators.append(IndicatorScore(
-        label="Errores de facturación atribuibles a la asistente",
-        target_label=f"≤ {cfg['ERROR_RATE_TARGET']:.0%} de las listas",
-        actual_label=f"{error_rate:.1%}" if error_rate is not None else "—",
-        weight=cfg["WEIGHT_ERROR_RATE"] * 100,
-        score=round(err_score, 1),
-    ))
+    indicators.append(
+        IndicatorScore(
+            label="Errores de facturación atribuibles a la asistente",
+            target_label=f"≤ {cfg['ERROR_RATE_TARGET']:.0%} de las listas",
+            actual_label=f"{error_rate:.1%}" if error_rate is not None else "—",
+            weight=cfg["WEIGHT_ERROR_RATE"] * 100,
+            score=round(err_score, 1),
+        )
+    )
 
     attainment = round(min(sum(i.score for i in indicators), 100.0), 1)
 

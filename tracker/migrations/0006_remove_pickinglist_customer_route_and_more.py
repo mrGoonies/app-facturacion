@@ -4,22 +4,21 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('tracker', '0005_alter_purchaserequestitem_quantity'),
+        ("tracker", "0005_alter_purchaserequestitem_quantity"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='pickinglist',
-            name='customer_route',
+            model_name="pickinglist",
+            name="customer_route",
         ),
         migrations.RemoveField(
-            model_name='pickinglistbatch',
-            name='customer_route',
+            model_name="pickinglistbatch",
+            name="customer_route",
         ),
         migrations.RemoveField(
-            model_name='pickinglistbatch',
-            name='sent_by',
+            model_name="pickinglistbatch",
+            name="sent_by",
         ),
     ]
