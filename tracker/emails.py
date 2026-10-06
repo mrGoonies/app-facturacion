@@ -1,4 +1,4 @@
-"""Notification emails for the purchase-request flow.
+"""Notification emails for the purchase-request and picking list flows.
 
 EMAIL_BACKEND defaults to the console backend (see config/settings.py), so
 locally these just print instead of sending — no mail server required to
@@ -329,3 +329,21 @@ def send_new_message_email(pr, activity):
             f"{activity.message}\n\n"
             f"Responder:\n{_absolute_url(pr.get_status_url())}\n",
         )
+
+
+def send_picking_lists_handed_off_email(lists):
+    """Logistics just handed off a batch — the invoicing clock is running,
+    so the assistant hears about it instead of having to watch the queue."""
+    if not lists:
+        return
+    count = len(lists)
+    target = settings.KPI_SETTINGS["IN_PROCESS_TARGET_HOURS"]
+    numbers = "\n".join(f"- {pl.number}" for pl in lists)
+    queue_url = _absolute_url(reverse("tracker:queue") + "?view=invoicing")
+    _send_to_staff(
+        f"Logística entregó {count} lista{'s' if count != 1 else ''} de picking",
+        f"Llegaron {count} lista{'s' if count != 1 else ''} de picking para facturar:\n\n"
+        f"{numbers}\n\n"
+        f"Meta: tomarlas dentro de {target} h. Puedes tomarlas y facturarlas "
+        f"en lote desde la cola:\n{queue_url}\n",
+    )

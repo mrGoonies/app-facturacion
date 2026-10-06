@@ -59,7 +59,7 @@
         {% for err in pl.errors.all %}
         <tr style="background:var(--color-alert-tint)"><td>Error de facturación reportado{% if err.disputed %} (disputado){% endif %}</td><td>{{ err.reported_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td>{{ err.reported_by|default:"Facturación" }}</td></tr>
         {% if err.corrected_at %}
-        <tr><td>Factura corregida emitida</td><td>{{ err.corrected_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td>{{ pl.handled_by|default:"—" }}</td></tr>
+        <tr><td>Factura corregida emitida{% if err.corrected_invoice_number %} ({{ err.corrected_invoice_number }}){% endif %}</td><td>{{ err.corrected_at|date:"d M · H:i" }}</td><td class="text-muted">—</td><td>{{ pl.handled_by|default:"—" }}</td></tr>
         {% endif %}
         {% endfor %}
       </tbody>
@@ -77,8 +77,9 @@
       {% if err.description %}<p class="card-body" style="opacity:1;font-size:14px">{{ err.description }}</p>{% endif %}
     </div>
 
-    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);align-items:center">
-      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="correct_error"><input type="hidden" name="error_id" value="{{ err.pk }}">
+    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);align-items:end;flex-wrap:wrap">
+      <form method="post" style="display:flex;gap:var(--space-2);align-items:end">{% csrf_token %}<input type="hidden" name="action" value="correct_error"><input type="hidden" name="error_id" value="{{ err.pk }}">
+        <div class="field"><label for="corrected-invoice">Factura corregida (opcional)</label><input class="input" id="corrected-invoice" name="corrected_invoice_number" placeholder="F-…"></div>
         <button class="btn btn-primary" style="padding:11px 26px" type="submit">Marcar como corregido</button>
       </form>
       <form method="post">{% csrf_token %}<input type="hidden" name="action" value="dispute_error"><input type="hidden" name="error_id" value="{{ err.pk }}">
@@ -88,30 +89,37 @@
     {% endif %}
     {% endwith %}
 
-    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);align-items:center">
-      {% if pl.status == 'not_started' %}
-      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="mark_in_process">
-        <button class="btn btn-primary" style="padding:11px 26px" type="submit">Marcar en proceso</button>
-      </form>
-      {% elif pl.status == 'in_process' %}
+    {% if pl.can_invoice %}
+    <div style="display:flex;gap:var(--space-3);margin-top:var(--space-4);align-items:end;flex-wrap:wrap">
+      {# Invoicing an untouched list is allowed: both timestamps stop now. #}
       <form method="post" style="display:flex;gap:var(--space-2);align-items:end">{% csrf_token %}<input type="hidden" name="action" value="issue_invoice">
-        <div class="field"><label>Número de factura</label><input class="input" name="invoice_number" placeholder="F-…"></div>
+        <div class="field"><label for="invoice-number">Número de factura</label><input class="input" id="invoice-number" name="invoice_number" placeholder="F-…" required></div>
         <button class="btn btn-primary" style="padding:11px 26px" type="submit">Emitir factura</button>
+      </form>
+      {% if pl.can_take %}
+      <form method="post">{% csrf_token %}<input type="hidden" name="action" value="mark_in_process">
+        <button class="btn btn-secondary" type="submit">Marcar en proceso</button>
       </form>
       {% endif %}
     </div>
+    {% endif %}
+    {% if pl.can_discard %}
+    <form method="post" style="margin-top:var(--space-3)" onsubmit="return confirm('¿Quitar la lista {{ pl.number }}? Úsalo solo si el número se ingresó por error.')">{% csrf_token %}<input type="hidden" name="action" value="discard_list">
+      <button class="btn btn-ghost" type="submit">Quitar lista (número mal ingresado)</button>
+    </form>
+    {% endif %}
   </div>
 
   <div>
-    {% if not pl.open_error %}
+    {% if pl.invoiced_at and not pl.open_error %}
     <h5>Reportar un error</h5>
-    <p class="text-muted" style="font-size:13px">Opcional, pero el motivo es lo que alimenta el KPI de errores. Cualquiera en facturación o logística puede reportarlo.</p>
+    <p class="text-muted" style="font-size:13px">El motivo es lo que alimenta el KPI de errores. Si lo detectó logística o el cliente, anótalo en "Reportado por".</p>
     <form method="post" class="card" style="gap:var(--space-3)">
       {% csrf_token %}
       <input type="hidden" name="action" value="report_error">
-      <div class="field"><label>Factura</label>{{ error_form.invoice_number }}</div>
-      <div class="field"><label>Tipo de error</label>{{ error_form.error_type }}</div>
-      <div class="field"><label>Reportado por</label>{{ error_form.reported_by }}</div>
+      <div class="field"><label>Factura</label>{{ error_form.invoice_number }}{% include "tracker/_errors.html" with errors=error_form.invoice_number.errors %}</div>
+      <div class="field"><label>Tipo de error</label>{{ error_form.error_type }}{% include "tracker/_errors.html" with errors=error_form.error_type.errors %}</div>
+      <div class="field"><label>Reportado por</label>{{ error_form.reported_by }}{% include "tracker/_errors.html" with errors=error_form.reported_by.errors %}</div>
       <div class="field"><label>Atribuible a</label></div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:-8px">
         {% for radio in error_form.attributable_to %}

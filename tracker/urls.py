@@ -22,7 +22,17 @@ urlpatterns = [
     path(
         "logistica/entrega/", views.logistics_handoff_create, name="logistics_handoff"
     ),
+    path(
+        "logistica/entrega/<str:number>/quitar/",
+        views.logistics_list_discard,
+        name="logistics_list_discard",
+    ),
     path("panel/", views.queue, name="queue"),
+    path(
+        "panel/facturacion/acciones/",
+        views.picking_list_bulk,
+        name="picking_list_bulk",
+    ),
     path("panel/compras/<int:pk>/", views.purchase_detail, name="purchase_detail"),
     path(
         "panel/picking/<str:number>/",

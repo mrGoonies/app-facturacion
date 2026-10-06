@@ -29,9 +29,24 @@
 
     <div class="submit-row" style="margin-top:var(--space-6)">
       <button class="btn btn-primary" style="padding:11px 26px" type="submit">Entregar listas</button>
-      <span class="text-muted" style="font-size:12px">La asistente es notificada de inmediato · meta: cambio de estado dentro de 2 h</span>
+      <span class="text-muted" style="font-size:12px">Facturación recibe un correo al instante · meta: tomarlas dentro de {{ in_process_target_hours }} h</span>
     </div>
   </form>
+
+  {% if not_started %}
+  <hr class="hr">
+  <h5 style="margin-bottom:4px">Esperando a facturación</h5>
+  <p class="text-muted" style="font-size:13px;margin-bottom:var(--space-3)">Aún nadie las toma. Si un número quedó mal escrito, quítalo aquí; una vez que facturación lo toma, avísale a ella.</p>
+  <div class="pl-waiting">
+    {% for pl in not_started %}
+    <form method="post" action="{% url 'tracker:logistics_list_discard' pl.number %}" class="pl-chip" onsubmit="return confirm('¿Quitar la lista {{ pl.number }}?')">
+      {% csrf_token %}
+      {{ pl.number }} <span class="text-muted" style="font-size:11px">{{ pl.handed_off_at|date:"d M H:i" }}</span>
+      <button type="submit" aria-label="Quitar {{ pl.number }}">×</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <hr class="hr">
   <h5 style="margin-bottom:var(--space-2)">Enviadas esta semana</h5>

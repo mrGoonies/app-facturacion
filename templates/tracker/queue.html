@@ -6,7 +6,11 @@
     <h3 style="margin:0">Cola</h3>
     <p class="text-muted" style="font-size:13px;margin:2px 0 0">{{ today|date:"l j F" }} · {{ rows|length }} {% if rows|length == 1 %}pendiente{% else %}pendientes{% endif %}</p>
   </div>
-  <div style="display:flex;gap:var(--space-2);align-items:center">
+  <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap">
+    <form method="get" role="search" style="display:flex;gap:var(--space-2)">
+      {% if view_filter != 'all' %}<input type="hidden" name="view" value="{{ view_filter }}">{% endif %}
+      <input class="input" type="search" name="q" value="{{ query }}" placeholder="Buscar PL-8836, PR-2410…" aria-label="Buscar por número" style="width:200px">
+    </form>
     <span class="seg">
       <span class="seg-opt"><a href="?view=all" style="text-decoration:none;color:inherit">Todo</a></span>
       <span class="seg-opt"><a href="?view=purchases" style="text-decoration:none;color:inherit">Compras</a></span>
@@ -22,12 +26,28 @@
   <div class="card elev-sm" style="gap:2px;background:var(--color-alert-tint);border-color:#eccfcb"><span class="card-kicker" style="color:var(--color-alert-ink)">Errores por corregir</span><span class="stat-number">{{ stats.errors_to_correct }}</span></div>
 </div>
 
+{% if view_filter == 'invoicing' and rows %}
+<form method="post" action="{% url 'tracker:picking_list_bulk' %}" id="bulk" class="bulk-bar">
+  {% csrf_token %}
+  <span class="text-muted" style="font-size:13px" data-bulk-count>Selecciona listas para trabajarlas en lote</span>
+  {# Invoicing comes first in the DOM so Enter in its input invoices; CSS shows "Tomar" first. #}
+  <span class="bulk-invoice">
+    <input class="input" name="invoice_number" placeholder="Factura para todas" aria-label="Número de factura para las seleccionadas">
+    <button class="btn btn-primary" type="submit" name="action" value="invoice">Facturar seleccionadas</button>
+  </span>
+  <button class="btn btn-secondary" type="submit" name="action" value="take">Tomar seleccionadas</button>
+</form>
+{% endif %}
+
 <div class="table-scroll">
 <table class="table">
-  <thead><tr><th>Ref</th><th>Tipo</th><th>Artículo</th><th>De</th><th>Recibido</th><th>Tiempo restante</th><th>Estado</th></tr></thead>
+  <thead><tr>{% if view_filter == 'invoicing' %}<th style="width:32px"><input type="checkbox" data-select-all aria-label="Seleccionar todas" hidden></th>{% endif %}<th>Ref</th><th>Tipo</th><th>Artículo</th><th>De</th><th>Recibido</th><th>Tiempo restante</th><th>Estado</th>{% if view_filter == 'invoicing' %}<th>Factura</th>{% endif %}</tr></thead>
   <tbody>
   {% for row in rows %}
     <tr>
+      {% if view_filter == 'invoicing' %}
+      <td>{% if row.can_invoice %}<input type="checkbox" form="bulk" name="lists" value="{{ row.pk }}" aria-label="Seleccionar {{ row.ref }}" data-row-check>{% endif %}</td>
+      {% endif %}
       <td><a href="{{ row.url }}">{{ row.ref }}</a></td>
       <td><span class="tag tag-type">{% if row.kind == 'purchase' %}Compra{% else %}Facturación{% endif %}</span></td>
       <td>{{ row.summary }}</td>
@@ -35,11 +55,50 @@
       <td>{{ row.received }}</td>
       <td><span class="tag {{ row.time_left_class }}">{{ row.time_left_label }}</span></td>
       <td><span class="tag {{ row.status_class }}">{{ row.status_label }}</span></td>
+      {% if view_filter == 'invoicing' %}
+      <td>
+        {% if row.can_invoice %}
+        <form method="post" action="{% url 'tracker:picking_list_bulk' %}" class="row-invoice">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="invoice">
+          <input type="hidden" name="lists" value="{{ row.pk }}">
+          <input class="input" name="invoice_number" placeholder="F-…" aria-label="Número de factura de {{ row.ref }}" required>
+          <button class="btn btn-secondary" type="submit">Facturar</button>
+        </form>
+        {% else %}<a href="{{ row.url }}">Ver error</a>{% endif %}
+      </td>
+      {% endif %}
     </tr>
   {% empty %}
-    <tr><td colspan="7" class="text-muted">No hay nada pendiente por ahora.</td></tr>
+    <tr><td colspan="{% if view_filter == 'invoicing' %}9{% else %}7{% endif %}" class="text-muted">{% if query %}Nada pendiente coincide con «{{ query }}».{% else %}No hay nada pendiente por ahora.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+
+{% if view_filter == 'invoicing' and rows %}
+<script>
+// "Select all" plus a live count. Without JS the per-row checkboxes still
+// work; only the header checkbox stays hidden.
+(function () {
+  var all = document.querySelector('[data-select-all]');
+  var checks = Array.prototype.slice.call(document.querySelectorAll('[data-row-check]'));
+  var count = document.querySelector('[data-bulk-count]');
+  if (!all || !checks.length) return;
+  var idle = count.textContent;
+  function update() {
+    var n = checks.filter(function (c) { return c.checked; }).length;
+    all.checked = n === checks.length;
+    all.indeterminate = n > 0 && n < checks.length;
+    count.textContent = n ? n + (n === 1 ? ' seleccionada' : ' seleccionadas') : idle;
+  }
+  all.addEventListener('change', function () {
+    checks.forEach(function (c) { c.checked = all.checked; });
+    update();
+  });
+  checks.forEach(function (c) { c.addEventListener('change', update); });
+  all.hidden = false;
+})();
+</script>
+{% endif %}
 {% endblock %}

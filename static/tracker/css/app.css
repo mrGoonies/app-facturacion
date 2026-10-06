@@ -242,3 +242,15 @@ textarea.input{min-height:90px;resize:vertical;border-radius:var(--radius-lg)}
   .submit-row .btn{width:100%}
   .stat-grid,.stat-grid--3{grid-template-columns:1fr 1fr}
 }
+
+/* Queue → Facturación: bulk actions over the selected picking lists */
+.bulk-bar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-3);margin:var(--space-4) 0 var(--space-2);
+  padding:var(--space-3) var(--space-4);border:1px solid var(--color-divider);border-radius:var(--radius-lg);background:#fff}
+.bulk-bar [data-bulk-count]{margin-right:auto}
+.row-invoice{display:flex;gap:var(--space-2);align-items:center}
+.row-invoice .input{width:110px}
+.bulk-invoice{display:flex;gap:var(--space-2);align-items:center;order:1}
+.bulk-invoice .input{width:170px}
+
+/* Logistics hand-off: untouched lists that can still be taken back */
+.pl-waiting{display:flex;flex-wrap:wrap;gap:var(--space-2)}

@@ -10,7 +10,13 @@ from django.utils import timezone
 
 from .forms import LogisticsHandoffForm
 from .kpi import compute_scorecard
-from .models import PickingList, PickingListBatch, PurchaseActivity, PurchaseRequest
+from .models import (
+    BillingError,
+    PickingList,
+    PickingListBatch,
+    PurchaseActivity,
+    PurchaseRequest,
+)
 
 
 def _make_list(number, hours_ago, **fields):
@@ -102,7 +108,19 @@ class PickingListNumberTests(TestCase):
             self._clean("PL-1001, PL 1002, pl1003"), ["PL-1001", "PL-1002", "PL1003"]
         )
 
-    def test_rejects_numbers_already_handed_off(self):
+    def test_skips_numbers_already_handed_off(self):
+        _make_list("PL-1001", hours_ago=1)
+        form = LogisticsHandoffForm(
+            data={
+                "shipped_on": timezone.localdate().isoformat(),
+                "list_numbers": "PL-1001, PL-1002",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["list_numbers"], ["PL-1002"])
+        self.assertEqual(form.skipped_numbers, ["PL-1001"])
+
+    def test_rejects_when_every_number_was_handed_off(self):
         _make_list("PL-1001", hours_ago=1)
         form = LogisticsHandoffForm(
             data={
@@ -726,3 +744,148 @@ class PoToAccountingTests(TestCase):
         self._with_uploads()
         send_po_to_accounting(self.pr)
         self.assertEqual(mail.outbox, [])
+
+
+@PLAIN_STATIC
+class PickingFlowTests(TestCase):
+    """Logistics hands lists off and can take back a mistyped one; the
+    assistant takes and invoices them in bulk from the queue, and no
+    transition can rewind the timestamps the invoicing KPIs read."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            "asistente", email="facturacion@example.com", password="x", is_staff=True
+        )
+        self.client.force_login(self.user)
+
+    def _bulk(self, action, lists, follow=False, **data):
+        return self.client.post(
+            reverse("tracker:picking_list_bulk"),
+            {"action": action, "lists": [pl.pk for pl in lists], **data},
+            follow=follow,
+        )
+
+    def _detail(self, pl, **data):
+        return self.client.post(
+            reverse("tracker:picking_list_detail", args=[pl.number]), data
+        )
+
+    def test_handoff_emails_staff_and_reports_skipped_numbers(self):
+        _make_list("PL-1", hours_ago=1)
+        self.client.logout()
+        resp = self.client.post(
+            reverse("tracker:logistics_handoff"),
+            {
+                "shipped_on": timezone.localdate().isoformat(),
+                "list_numbers": "PL-1, PL-2, PL-3",
+            },
+            follow=True,
+        )
+        self.assertEqual(
+            set(PickingList.objects.values_list("number", flat=True)),
+            {"PL-1", "PL-2", "PL-3"},
+        )
+        self.assertContains(resp, "Omitimos PL-1")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["facturacion@example.com"])
+        self.assertIn("PL-2", mail.outbox[0].body)
+        self.assertNotIn("PL-1\n", mail.outbox[0].body)
+
+    def test_logistics_can_discard_only_untouched_lists(self):
+        mistyped = _make_list("PL-9", hours_ago=1)
+        taken = _make_list("PL-8", hours_ago=1)
+        taken.mark_in_process(self.user)
+        self.client.logout()
+        for pl in (mistyped, taken):
+            self.client.post(
+                reverse("tracker:logistics_list_discard", args=[pl.number])
+            )
+        self.assertFalse(PickingList.objects.filter(number="PL-9").exists())
+        self.assertFalse(PickingListBatch.objects.filter(pk=mistyped.batch_id).exists())
+        self.assertTrue(PickingList.objects.filter(number="PL-8").exists())
+
+    def test_bulk_take_marks_only_untouched_lists(self):
+        fresh = _make_list("PL-1", hours_ago=1)
+        started = _make_list("PL-2", hours_ago=1)
+        started.mark_in_process(self.user, now=timezone.now() - timedelta(minutes=30))
+        first_take = PickingList.objects.get(pk=started.pk).in_process_at
+        self._bulk("take", [fresh, started])
+        fresh.refresh_from_db()
+        started.refresh_from_db()
+        self.assertEqual(fresh.status, PickingList.Status.IN_PROCESS)
+        self.assertEqual(fresh.handled_by, self.user)
+        self.assertEqual(started.in_process_at, first_take)
+
+    def test_bulk_invoice_shares_one_invoice_number(self):
+        lists = [_make_list(f"PL-{n}", hours_ago=1) for n in (1, 2)]
+        lists[0].mark_in_process(self.user)
+        self._bulk("invoice", lists, invoice_number="F-100")
+        for pl in lists:
+            pl.refresh_from_db()
+            self.assertEqual(pl.status, PickingList.Status.INVOICED)
+            self.assertEqual(pl.invoice_number, "F-100")
+        # Invoiced straight from "not started": both legs stop at once.
+        self.assertEqual(lists[1].in_process_at, lists[1].invoiced_at)
+
+    def test_bulk_invoice_requires_a_number(self):
+        pl = _make_list("PL-1", hours_ago=1)
+        resp = self._bulk("invoice", [pl], invoice_number=" ", follow=True)
+        pl.refresh_from_db()
+        self.assertEqual(pl.status, PickingList.Status.NOT_STARTED)
+        self.assertContains(resp, "Ingresa el número de factura.")
+
+    def test_repeated_posts_cannot_rewind_an_invoiced_list(self):
+        pl = _make_list("PL-1", hours_ago=3)
+        self._detail(pl, action="issue_invoice", invoice_number="F-1")
+        pl.refresh_from_db()
+        invoiced_at = pl.invoiced_at
+        self._detail(pl, action="mark_in_process")
+        self._detail(pl, action="issue_invoice", invoice_number="F-2")
+        pl.refresh_from_db()
+        self.assertEqual(pl.status, PickingList.Status.INVOICED)
+        self.assertEqual(pl.invoice_number, "F-1")
+        self.assertEqual(pl.invoiced_at, invoiced_at)
+
+    def test_invalid_error_report_rerenders_with_errors(self):
+        pl = _make_list("PL-1", hours_ago=3)
+        pl.issue_invoice("F-1", self.user)
+        resp = self._detail(pl, action="report_error", error_type="")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Este campo es obligatorio.")
+        self.assertFalse(pl.errors.exists())
+
+    def test_correction_records_new_invoice_once(self):
+        pl = _make_list("PL-1", hours_ago=3)
+        pl.issue_invoice("F-1", self.user)
+        err = pl.errors.create(
+            error_type="Precio", attributable_to=BillingError.Attributable.ASSISTANT
+        )
+        self._detail(
+            pl,
+            action="correct_error",
+            error_id=err.pk,
+            corrected_invoice_number="F-1b",
+        )
+        err.refresh_from_db()
+        pl.refresh_from_db()
+        self.assertEqual(err.corrected_invoice_number, "F-1b")
+        self.assertEqual(pl.invoice_number, "F-1b")
+        corrected_at = err.corrected_at
+        self._detail(pl, action="dispute_error", error_id=err.pk)
+        err.refresh_from_db()
+        self.assertFalse(err.disputed)
+        self.assertEqual(err.corrected_at, corrected_at)
+
+    def test_search_jumps_to_an_exact_list_number(self):
+        pl = _make_list("PL-8836", hours_ago=1)
+        pl.issue_invoice("F-1", self.user)
+        resp = self.client.get(reverse("tracker:queue") + "?q=pl 8836")
+        self.assertRedirects(
+            resp, reverse("tracker:picking_list_detail", args=["PL-8836"])
+        )
+
+    def test_invoicing_queue_offers_bulk_controls(self):
+        _make_list("PL-1", hours_ago=1)
+        resp = self.client.get(reverse("tracker:queue") + "?view=invoicing")
+        self.assertContains(resp, "Tomar seleccionadas")
+        self.assertContains(resp, 'name="lists"', count=2)

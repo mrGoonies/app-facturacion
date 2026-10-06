@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from datetime import date
 
@@ -9,9 +10,11 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from .emails import (
     send_new_message_email,
+    send_picking_lists_handed_off_email,
     send_po_issued_email,
     send_po_to_accounting,
     send_purchase_request_created_emails,
@@ -29,6 +32,7 @@ from .forms import (
     PurchaseRequestForm,
     PurchaseRequestItemFormSet,
     SupplierQuoteForm,
+    normalize_list_number,
 )
 from .kpi import compute_scorecard
 from .models import (
@@ -212,14 +216,22 @@ def logistics_handoff_create(request):
             with transaction.atomic():
                 batch = form.save()
                 now = timezone.now()
-                for number in form.cleaned_data["list_numbers"]:
+                lists = [
                     PickingList.objects.create(
                         number=number, batch=batch, handed_off_at=now
                     )
+                    for number in form.cleaned_data["list_numbers"]
+                ]
+            send_picking_lists_handed_off_email(lists)
             messages.success(
                 request,
-                f"Se entregaron {len(form.cleaned_data['list_numbers'])} listas.",
+                f"Se entregaron {len(lists)} listas. Le avisamos a facturación.",
             )
+            if form.skipped_numbers:
+                messages.warning(
+                    request,
+                    f"Omitimos {', '.join(form.skipped_numbers)}: ya estaban registradas.",
+                )
             return redirect("tracker:logistics_handoff")
     else:
         form = LogisticsHandoffForm(initial={"shipped_on": timezone.localdate()})
@@ -227,11 +239,35 @@ def logistics_handoff_create(request):
     recent_batches = PickingListBatch.objects.prefetch_related(
         "lists", "lists__errors"
     ).order_by("-created_at")[:7]
+    # Untouched lists are the ones logistics can still take back.
+    not_started = PickingList.objects.filter(
+        status=PickingList.Status.NOT_STARTED
+    ).order_by("-handed_off_at", "number")
     return render(
         request,
         "tracker/logistics_handoff_form.html",
-        {"form": form, "recent_batches": recent_batches},
+        {
+            "form": form,
+            "recent_batches": recent_batches,
+            "not_started": not_started,
+            "in_process_target_hours": settings.KPI_SETTINGS["IN_PROCESS_TARGET_HOURS"],
+        },
     )
+
+
+@require_POST
+def logistics_list_discard(request, number):
+    """Lets logistics take back a mistyped number before invoicing starts
+    on it; otherwise it would sit in the queue and count as late."""
+    pl = get_object_or_404(PickingList, number=number)
+    if pl.discard():
+        messages.success(request, f"Quitamos la lista {number}.")
+    else:
+        messages.error(
+            request,
+            f"Facturación ya empezó a trabajar la lista {number}; avísales para corregirla.",
+        )
+    return redirect("tracker:logistics_handoff")
 
 
 # -------------------------------------------------------------- internal ---
@@ -254,6 +290,10 @@ class QueueRow:
     actionable: bool = True
     line_stopped: bool = False
     ready_to_issue_po: bool = False
+    # Picking lists only: the queue's bulk take/invoice controls.
+    pk: int | None = None
+    can_take: bool = False
+    can_invoice: bool = False
 
 
 def _format_hm(hours):
@@ -274,10 +314,29 @@ def _time_left(remaining_hours):
     return f"{remaining_hours:.0f} h", "tag-on-time"
 
 
+def _find_by_ref(query):
+    """URL of the picking list or purchase request a search names exactly,
+    whatever its status — so "how is PL-8836 going?" is one search away."""
+    number = normalize_list_number(query)
+    if PickingList.objects.filter(number=number).exists():
+        return reverse("tracker:picking_list_detail", args=[number])
+    match = re.fullmatch(r"PR-?(\d+)", number)
+    if match:
+        pr = PurchaseRequest.objects.filter(pk=int(match[1]) - 2400).first()
+        if pr:
+            return reverse("tracker:purchase_detail", args=[pr.pk])
+    return None
+
+
 @login_required
 def queue(request):
     now = timezone.now()
     view_filter = request.GET.get("view", "all")
+    query = request.GET.get("q", "").strip()
+    if query:
+        found = _find_by_ref(query)
+        if found:
+            return redirect(found)
 
     # PO-issued requests stay listed until received, so they're followed up
     # instead of vanishing from sight the moment the PO goes out.
@@ -365,6 +424,9 @@ def queue(request):
                 status_label=status_label,
                 status_class=status_class,
                 url=reverse("tracker:picking_list_detail", args=[pl.number]),
+                pk=pl.pk,
+                can_take=pl.can_take,
+                can_invoice=pl.can_invoice,
             )
         )
 
@@ -386,6 +448,9 @@ def queue(request):
         rows = [r for r in rows if r.kind == "purchase"]
     elif view_filter == "invoicing":
         rows = [r for r in rows if r.kind == "invoicing"]
+    if query:
+        needle = query.upper()
+        rows = [r for r in rows if needle in f"{r.ref} {r.summary} {r.origin}".upper()]
 
     stats = {
         "awaiting_quotes": open_requests.filter(
@@ -411,6 +476,7 @@ def queue(request):
             "rows": rows,
             "stats": stats,
             "view_filter": view_filter,
+            "query": query,
             "today": now,
             "active_nav": active_nav,
         },
@@ -578,63 +644,153 @@ def purchase_detail(request, pk):
     return redirect("tracker:purchase_detail", pk=pk)
 
 
-@login_required
-def picking_list_detail(request, number):
-    pl = get_object_or_404(PickingList, number=number)
+INVOICE_NUMBER_MAX_LENGTH = PickingList._meta.get_field("invoice_number").max_length
 
-    if request.method == "POST":
-        action = request.POST.get("action")
-        if action == "mark_in_process":
-            pl.status = PickingList.Status.IN_PROCESS
-            pl.in_process_at = timezone.now()
-            pl.handled_by = request.user
-            pl.save()
-        elif action == "issue_invoice":
-            invoice_number = request.POST.get("invoice_number", "").strip()
-            if not invoice_number:
-                messages.error(request, "Ingresa el número de factura.")
-                return redirect("tracker:picking_list_detail", number=number)
-            pl.invoice_number = invoice_number
-            pl.invoiced_at = timezone.now()
-            pl.status = PickingList.Status.INVOICED
-            pl.handled_by = request.user
-            pl.save()
-        elif action == "report_error":
-            if not pl.invoiced_at:
-                messages.error(
-                    request, "Solo puedes reportar errores en listas facturadas."
-                )
-                return redirect("tracker:picking_list_detail", number=number)
-            error_form = BillingErrorForm(request.POST)
-            if error_form.is_valid():
-                err = error_form.save(commit=False)
-                err.picking_list = pl
-                err.invoice_number = err.invoice_number or pl.invoice_number
-                err.save()
-                pl.status = PickingList.Status.ERROR
-                pl.save()
-        elif action == "correct_error":
-            error_id = request.POST.get("error_id")
-            err = get_object_or_404(BillingError, pk=error_id, picking_list=pl)
-            err.corrected_at = timezone.now()
-            err.save()
-            pl.status = PickingList.Status.CORRECTED
-            pl.save()
-        elif action == "dispute_error":
-            error_id = request.POST.get("error_id")
-            err = get_object_or_404(BillingError, pk=error_id, picking_list=pl)
-            err.disputed = True
-            err.save()
-            pl.status = PickingList.Status.INVOICED
-            pl.save()
-        return redirect("tracker:picking_list_detail", number=number)
 
-    error_form = BillingErrorForm(initial={"invoice_number": pl.invoice_number})
+def _invoice_number(request, field="invoice_number"):
+    """The typed invoice number, or None (with an error message) when it's
+    missing or longer than the field allows."""
+    value = request.POST.get(field, "").strip()
+    if not value:
+        messages.error(request, "Ingresa el número de factura.")
+        return None
+    if len(value) > INVOICE_NUMBER_MAX_LENGTH:
+        messages.error(
+            request,
+            f"El número de factura admite hasta {INVOICE_NUMBER_MAX_LENGTH} caracteres.",
+        )
+        return None
+    return value
+
+
+def _render_picking_list_detail(request, pl, error_form=None):
     return render(
         request,
         "tracker/picking_list_detail.html",
-        {"pl": pl, "error_form": error_form, "active_nav": "invoicing"},
+        {
+            "pl": pl,
+            "error_form": error_form
+            or BillingErrorForm(initial={"invoice_number": pl.invoice_number}),
+            "active_nav": "invoicing",
+        },
     )
+
+
+@login_required
+def picking_list_detail(request, number):
+    pl = get_object_or_404(PickingList, number=number)
+    if request.method != "POST":
+        return _render_picking_list_detail(request, pl)
+
+    action = request.POST.get("action")
+    if action == "mark_in_process":
+        if pl.mark_in_process(request.user):
+            messages.success(request, f"{pl.number} en proceso.")
+        else:
+            messages.error(request, "Esta lista ya estaba en proceso o facturada.")
+    elif action == "issue_invoice":
+        invoice_number = _invoice_number(request)
+        if invoice_number and pl.issue_invoice(invoice_number, request.user):
+            messages.success(request, f"{pl.number} facturada con {invoice_number}.")
+        elif invoice_number:
+            messages.error(request, "Esta lista ya estaba facturada.")
+    elif action == "discard_list":
+        if pl.discard():
+            messages.success(request, f"Quitamos la lista {number}.")
+            return redirect(reverse("tracker:queue") + "?view=invoicing")
+        messages.error(request, "Solo puedes quitar listas sin iniciar.")
+    elif action == "report_error":
+        if not pl.invoiced_at or pl.open_error:
+            messages.error(
+                request,
+                "Solo puedes reportar errores en listas facturadas sin otro error abierto.",
+            )
+        else:
+            error_form = BillingErrorForm(request.POST)
+            if not error_form.is_valid():
+                # Re-render so what was typed isn't lost.
+                messages.error(request, "Revisa el reporte: hay campos con errores.")
+                return _render_picking_list_detail(request, pl, error_form=error_form)
+            err = error_form.save(commit=False)
+            err.picking_list = pl
+            err.invoice_number = err.invoice_number or pl.invoice_number
+            err.save()
+            pl.status = PickingList.Status.ERROR
+            pl.save(update_fields=["status"])
+            messages.success(request, "Error reportado.")
+    elif action in ("correct_error", "dispute_error"):
+        err = get_object_or_404(
+            BillingError, pk=request.POST.get("error_id"), picking_list=pl
+        )
+        if not err.is_open:
+            messages.error(request, "Este error ya estaba cerrado.")
+        elif action == "correct_error":
+            new_invoice = request.POST.get("corrected_invoice_number", "").strip()
+            if len(new_invoice) > INVOICE_NUMBER_MAX_LENGTH:
+                messages.error(
+                    request,
+                    f"El número de factura admite hasta {INVOICE_NUMBER_MAX_LENGTH} caracteres.",
+                )
+                return redirect("tracker:picking_list_detail", number=number)
+            err.corrected_at = timezone.now()
+            err.corrected_invoice_number = new_invoice
+            err.save(update_fields=["corrected_at", "corrected_invoice_number"])
+            pl.status = PickingList.Status.CORRECTED
+            pl.invoice_number = new_invoice or pl.invoice_number
+            pl.save(update_fields=["status", "invoice_number"])
+            messages.success(request, "Error marcado como corregido.")
+        else:
+            err.disputed = True
+            err.save(update_fields=["disputed"])
+            pl.status = PickingList.Status.INVOICED
+            pl.save(update_fields=["status"])
+            messages.success(request, "Error disputado: no cuenta para el bono.")
+    return redirect("tracker:picking_list_detail", number=number)
+
+
+@login_required
+@require_POST
+def picking_list_bulk(request):
+    """The queue's bulk actions on the selected lists: take them (→ in
+    process), or invoice them. One shared invoice number covers every
+    selected list; a single row's form sends just its own list."""
+    action = request.POST.get("action")
+    lists = list(
+        PickingList.objects.filter(pk__in=request.POST.getlist("lists")).order_by(
+            "number"
+        )
+    )
+    back = redirect(reverse("tracker:queue") + "?view=invoicing")
+    if not lists:
+        messages.error(request, "Selecciona al menos una lista.")
+        return back
+
+    now = timezone.now()
+    if action == "take":
+        done = [pl.number for pl in lists if pl.mark_in_process(request.user, now)]
+        verb = "en proceso"
+    elif action == "invoice":
+        invoice_number = _invoice_number(request)
+        if not invoice_number:
+            return back
+        done = [
+            pl.number
+            for pl in lists
+            if pl.issue_invoice(invoice_number, request.user, now)
+        ]
+        verb = f"facturada{'s' if len(done) != 1 else ''} con {invoice_number}"
+    else:
+        return back
+
+    if done:
+        messages.success(request, f"{', '.join(done)} {verb}.")
+    skipped = [pl.number for pl in lists if pl.number not in done]
+    if skipped:
+        messages.warning(
+            request,
+            f"Sin cambios en {', '.join(skipped)}: ya habían avanzado de estado.",
+        )
+    return back
 
 
 @login_required

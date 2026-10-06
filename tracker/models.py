@@ -457,6 +457,66 @@ class PickingList(models.Model):
     def open_error(self):
         return self.errors.filter(corrected_at__isnull=True, disputed=False).first()
 
+    # Transitions shared by the detail page and the queue's bulk actions.
+    # Each guards the current status and returns whether it applied, so a
+    # double submit or a stale page can't rewind the KPI timestamps.
+
+    @property
+    def can_take(self):
+        return self.status == self.Status.NOT_STARTED
+
+    @property
+    def can_invoice(self):
+        return self.status in (self.Status.NOT_STARTED, self.Status.IN_PROCESS)
+
+    @property
+    def can_discard(self):
+        """A list nobody has touched yet may be removed — it was most likely
+        a mistyped number, and leaving it would count as late forever."""
+        return self.status == self.Status.NOT_STARTED
+
+    def mark_in_process(self, user, now=None):
+        if not self.can_take:
+            return False
+        self.status = self.Status.IN_PROCESS
+        self.in_process_at = now or timezone.now()
+        self.handled_by = user
+        self.save(update_fields=["status", "in_process_at", "handled_by"])
+        return True
+
+    def issue_invoice(self, invoice_number, user, now=None):
+        """Invoicing straight from "not started" is allowed: the list was
+        picked up and finished in the same moment, so both legs stop now."""
+        if not self.can_invoice or not invoice_number:
+            return False
+        now = now or timezone.now()
+        self.in_process_at = self.in_process_at or now
+        self.invoice_number = invoice_number
+        self.invoiced_at = now
+        self.status = self.Status.INVOICED
+        self.handled_by = user
+        self.save(
+            update_fields=[
+                "status",
+                "in_process_at",
+                "invoice_number",
+                "invoiced_at",
+                "handled_by",
+            ]
+        )
+        return True
+
+    def discard(self):
+        """Deletes a mistaken, untouched list, and its batch if it was the
+        batch's last list."""
+        if not self.can_discard:
+            return False
+        batch = self.batch
+        self.delete()
+        if not batch.lists.exists():
+            batch.delete()
+        return True
+
 
 class BillingError(models.Model):
     class Attributable(models.TextChoices):
@@ -474,6 +534,11 @@ class BillingError(models.Model):
     reported_by = models.CharField(max_length=120, blank=True)
     reported_at = models.DateTimeField(auto_now_add=True)
     corrected_at = models.DateTimeField(null=True, blank=True)
+    corrected_invoice_number = models.CharField(
+        max_length=40,
+        blank=True,
+        help_text="Factura emitida para corregir la original (opcional).",
+    )
     disputed = models.BooleanField(default=False)
 
     class Meta:
@@ -481,6 +546,10 @@ class BillingError(models.Model):
 
     def __str__(self):
         return f"{self.picking_list.number} — {self.error_type}"
+
+    @property
+    def is_open(self):
+        return not self.corrected_at and not self.disputed
 
     @property
     def counts_against_bonus(self):

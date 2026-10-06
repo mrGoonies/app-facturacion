@@ -22,6 +22,12 @@ from .models import (
 # TOKEN_RE in logistics_handoff_form.html.
 PL_NUMBER_RE = re.compile(r"[A-Za-z]+[ \t-]?\d+|\d+")
 
+
+def normalize_list_number(raw):
+    """Canonical form of one picking list number: "pl 1003" → "PL-1003"."""
+    return re.sub(r"[ \t]+", "-", raw.strip().upper())
+
+
 UNIT_CHOICES = [
     ("", "Selecciona…"),
     ("pza", "Pieza (pza)"),
@@ -171,9 +177,14 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
         model = PickingListBatch
         fields = ["shipped_on"]
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Numbers already handed off earlier, left out of this batch.
+        self.skipped_numbers = []
+
     def clean_list_numbers(self):
         raw = self.cleaned_data["list_numbers"]
-        numbers = [re.sub(r"[ \t]+", "-", n.upper()) for n in PL_NUMBER_RE.findall(raw)]
+        numbers = [normalize_list_number(n) for n in PL_NUMBER_RE.findall(raw)]
         if not numbers:
             raise forms.ValidationError(
                 "Ingresa al menos un número de lista de picking."
@@ -188,11 +199,15 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
                 "number", flat=True
             )
         )
-        if existing:
+        # A re-scanned list shouldn't block the rest of the batch: skip it
+        # and say so, unless that leaves nothing to hand off.
+        new = [n for n in deduped if n not in existing]
+        if not new:
             raise forms.ValidationError(
-                f"Ya registradas: {', '.join(sorted(existing))}. Quítalas para continuar."
+                f"Ya estaban registradas: {', '.join(sorted(existing))}."
             )
-        return deduped
+        self.skipped_numbers = sorted(existing)
+        return new
 
 
 class SupplierQuoteForm(StyledFormMixin, forms.ModelForm):
