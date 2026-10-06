@@ -1,7 +1,6 @@
 databases:
   - name: app-facturacion-db
     databaseName: app_facturacion
-    plan: free # bump before real use — free Postgres on Render expires after 90 days
 
 services:
   - type: web
