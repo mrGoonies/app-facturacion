@@ -223,6 +223,13 @@ DEFAULT_CURRENCY = config("DEFAULT_CURRENCY", default="CLP")
 PURCHASE_AUTO_REMIND_HOURS = config("PURCHASE_AUTO_REMIND_HOURS", default=48, cast=int)
 PURCHASE_AUTO_CANCEL_DAYS = config("PURCHASE_AUTO_CANCEL_DAYS", default=7, cast=int)
 
+# Accounting (the accountant and their assistant) gets every issued PO with
+# its PDF and the chosen supplier quote attached. Comma-separated; empty
+# turns it off. While set, the PO PDF is required when issuing a PO.
+PURCHASE_ACCOUNTING_EMAILS = config(
+    "PURCHASE_ACCOUNTING_EMAILS", default="", cast=Csv()
+)
+
 
 # KPI targets and bonus formula — see tracker/kpi.py. Kept here so the
 # business rules the design assumed (48h/2h/8h/2%, weighted score, base

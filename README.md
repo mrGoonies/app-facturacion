@@ -80,6 +80,10 @@ The repo has a `render.yaml` Blueprint (Postgres + a Python web service).
    - `CLOUDINARY_URL`
    - `MAILCHIMP_API_KEY`, `DEFAULT_FROM_EMAIL` (a verified sending domain in
      Mailchimp Transactional)
+   - `PURCHASE_ACCOUNTING_EMAILS`: comma-separated addresses (the accountant
+     and their assistant) that receive every issued PO, with the PO PDF and
+     the chosen supplier quote attached. While it's set, the assistant must
+     upload the PO PDF to issue a PO. Leave it empty to turn this off.
 3. First deploy runs migrations as part of the build (see `buildCommand` in
    `render.yaml`). Once it's live, create the assistant's login from the
    Render shell (**Shell** tab on the service, or `render ssh`):

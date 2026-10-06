@@ -624,3 +624,105 @@ class StaleRequestCommandTests(TestCase):
         pr.refresh_from_db()
         self.assertEqual(pr.status, PurchaseRequest.Status.AWAITING_CONFIRMATION)
         self.assertEqual(len(mail.outbox), 0)
+
+
+ACCOUNTING = override_settings(
+    PURCHASE_ACCOUNTING_EMAILS=[
+        "contador@example.com",
+        "asistente.contable@example.com",
+    ]
+)
+
+
+@PLAIN_STATIC
+@ACCOUNTING
+class PoToAccountingTests(TestCase):
+    """Accounting receives every issued PO with the PO PDF and the chosen
+    quote attached."""
+
+    def setUp(self):
+        self.client.force_login(
+            get_user_model().objects.create_user(
+                "asistente", password="x", is_staff=True
+            )
+        )
+        self.pr = _make_request(
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            confirmed_at=timezone.now(),
+        )
+        self.quote = self.pr.quotes.create(
+            supplier_name="Ferretería Sur", total_amount=125000, selected=True
+        )
+        self.pr.items.create(description="Guantes", quantity=10, unit="caja")
+
+    def _with_uploads(self):
+        # Stored public ids, as left behind by a real Cloudinary upload.
+        PurchaseRequest.objects.filter(pk=self.pr.pk).update(
+            status=PurchaseRequest.Status.PO_ISSUED,
+            po_number="OC-4510",
+            po_issued_at=timezone.now(),
+            po_pdf="purchase_orders/oc-4510",
+        )
+        self.quote.__class__.objects.filter(pk=self.quote.pk).update(
+            quote_pdf="supplier_quotes/sur"
+        )
+        self.pr.refresh_from_db()
+
+    def _accounting_mail(self):
+        return next(m for m in mail.outbox if "contador@example.com" in m.to)
+
+    def test_po_pdf_is_required_while_accounting_is_set(self):
+        resp = self.client.post(
+            reverse("tracker:purchase_detail", args=[self.pr.pk]),
+            {"action": "issue_po", "po_number": "OC-4510"},
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.pr.refresh_from_db()
+        self.assertIsNone(self.pr.po_issued_at)
+        self.assertContains(resp, "se envía a contabilidad")
+
+    def test_sends_po_and_quote_as_attachments(self):
+        from unittest import mock
+
+        from .emails import send_po_to_accounting
+
+        self._with_uploads()
+        with mock.patch(
+            "tracker.emails._fetch_file",
+            return_value=("https://res.example/x.pdf", b"%PDF-1.4"),
+        ):
+            send_po_to_accounting(self.pr)
+        msg = self._accounting_mail()
+        self.assertEqual(
+            msg.to, ["contador@example.com", "asistente.contable@example.com"]
+        )
+        self.assertIn("OC-4510", msg.subject)
+        self.assertEqual(
+            [name for name, _, _ in msg.attachments],
+            ["OC-4510.pdf", "Cotizacion_Ferretería_Sur.pdf"],
+        )
+        self.assertIn("Ferretería Sur", msg.body)
+        self.assertIn("Guantes", msg.body)
+
+    def test_falls_back_to_link_when_download_fails(self):
+        from unittest import mock
+
+        from .emails import send_po_to_accounting
+
+        self._with_uploads()
+        with mock.patch(
+            "tracker.emails._fetch_file",
+            return_value=("https://res.example/x.pdf", None),
+        ):
+            send_po_to_accounting(self.pr)
+        msg = self._accounting_mail()
+        self.assertEqual(msg.attachments, [])
+        self.assertIn("https://res.example/x.pdf", msg.body)
+
+    @override_settings(PURCHASE_ACCOUNTING_EMAILS=[])
+    def test_off_when_not_configured(self):
+        from .emails import send_po_to_accounting
+
+        self._with_uploads()
+        send_po_to_accounting(self.pr)
+        self.assertEqual(mail.outbox, [])

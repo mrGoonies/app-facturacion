@@ -31,6 +31,10 @@ services:
         sync: false
       - key: DEFAULT_FROM_EMAIL
         sync: false
+      # Comma-separated: the accountant and their assistant, who get every
+      # issued PO with its PDF and the chosen quote attached.
+      - key: PURCHASE_ACCOUNTING_EMAILS
+        sync: false
 
   # Hourly follow-up on quotes waiting on the requester: reminder after
   # PURCHASE_AUTO_REMIND_HOURS, cancellation after PURCHASE_AUTO_CANCEL_DAYS

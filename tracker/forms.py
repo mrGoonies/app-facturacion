@@ -230,6 +230,8 @@ class IssuePOForm(StyledFormMixin, forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["po_number"].required = True
+        # Accounting needs the actual document, not just the number.
+        self.fields["po_pdf"].required = bool(settings.PURCHASE_ACCOUNTING_EMAILS)
 
     def clean_po_pdf(self):
         pdf = self.cleaned_data.get("po_pdf")

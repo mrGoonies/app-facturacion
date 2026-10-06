@@ -134,7 +134,7 @@
       {% include "tracker/_errors.html" with errors=po_form.non_field_errors %}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3)">
         <div class="field"><label for="{{ po_form.po_number.id_for_label }}">Número de OC (del ERP)</label>{{ po_form.po_number }}{% include "tracker/_errors.html" with errors=po_form.po_number.errors %}</div>
-        <div class="field"><label for="{{ po_form.po_pdf.id_for_label }}">PDF de la OC (opcional)</label>{{ po_form.po_pdf }}{% include "tracker/_errors.html" with errors=po_form.po_pdf.errors %}</div>
+        <div class="field"><label for="{{ po_form.po_pdf.id_for_label }}">PDF de la OC {% if po_form.po_pdf.field.required %}(se envía a contabilidad){% else %}(opcional){% endif %}</label>{{ po_form.po_pdf }}{% include "tracker/_errors.html" with errors=po_form.po_pdf.errors %}</div>
       </div>
       <div style="display:flex;gap:var(--space-3);align-items:center">
         <button class="btn btn-primary" style="padding:12px 28px" type="submit">Emitir orden de compra</button>

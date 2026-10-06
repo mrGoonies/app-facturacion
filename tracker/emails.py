@@ -9,11 +9,20 @@ neither the requester nor the assistant has to keep checking the app to find
 out it's their turn.
 """
 
+import logging
+from urllib.request import urlopen
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
+from django.core.mail import EmailMessage, send_mail
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.text import get_valid_filename
+
+logger = logging.getLogger(__name__)
+
+# Per file — issuing a PO waits on these downloads, so keep it bounded.
+ATTACHMENT_TIMEOUT_SECONDS = 15
 
 
 def _absolute_url(path: str) -> str:
@@ -179,6 +188,78 @@ def send_po_issued_email(pr):
         f"Cuando recibas los artículos, confírmalo aquí para cerrar la solicitud:\n"
         f"{_absolute_url(pr.get_status_url())}\n",
     )
+
+
+def _fetch_file(resource):
+    """Downloads an uploaded Cloudinary file so it can be attached.
+    Returns (url, content); either is None when it can't be had — the
+    email then carries the link, or a note, instead of failing the PO."""
+    try:
+        url = resource.url
+    except ValueError:  # Cloudinary not configured
+        logger.exception("No se pudo obtener la URL de %s", resource)
+        return None, None
+    try:
+        with urlopen(url, timeout=ATTACHMENT_TIMEOUT_SECONDS) as response:
+            return url, response.read()
+    except OSError:
+        logger.exception("No se pudo descargar %s para adjuntarlo", url)
+        return url, None
+
+
+def send_po_to_accounting(pr):
+    """Sends accounting (PURCHASE_ACCOUNTING_EMAILS) the issued PO with the
+    PO PDF and the quote the requester chose attached."""
+    recipients = settings.PURCHASE_ACCOUNTING_EMAILS
+    if not recipients:
+        return
+    quote = pr.selected_quote
+    issued_at = timezone.localtime(pr.po_issued_at)
+    total = (
+        f"{quote.currency} {quote.total_amount:,.{0 if quote.currency == 'CLP' else 2}f}"
+        if quote and quote.total_amount
+        else "no capturado"
+    )
+    message = EmailMessage(
+        subject=f"OC {pr.po_number} emitida · {quote.supplier_name if quote else pr.display_ref}",
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=recipients,
+    )
+
+    documents = [
+        ("Orden de compra", f"{pr.po_number}.pdf", pr.po_pdf),
+        (
+            "Cotización elegida",
+            f"Cotizacion {quote.supplier_name}.pdf" if quote else "",
+            quote.quote_pdf if quote else None,
+        ),
+    ]
+    document_lines = []
+    for label, filename, resource in documents:
+        if not resource:
+            document_lines.append(f"- {label}: no se subió a la app")
+            continue
+        url, content = _fetch_file(resource)
+        if content is not None:
+            message.attach(get_valid_filename(filename), content, "application/pdf")
+            document_lines.append(f"- {label}: adjunta")
+        elif url:
+            document_lines.append(
+                f"- {label}: no se pudo adjuntar, descárgala aquí: {url}"
+            )
+        else:
+            document_lines.append(f"- {label}: no disponible")
+
+    message.body = (
+        f"Se emitió la orden de compra {pr.po_number} el {issued_at:%d/%m/%Y %H:%M}.\n\n"
+        f"Proveedor: {quote.supplier_name if quote else '—'}\n"
+        f"Total cotizado: {total}\n"
+        f"Condiciones de pago: {(quote.payment_terms if quote else '') or '—'}\n"
+        f"Solicitud: {pr.display_ref} · {pr.requester_name} ({pr.department})\n\n"
+        f"Artículos:\n{_items_summary(pr)}\n\n"
+        f"Documentos:\n" + "\n".join(document_lines) + "\n"
+    )
+    message.send()
 
 
 def send_request_closed_email(pr):

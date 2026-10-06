@@ -13,6 +13,7 @@ from django.utils import timezone
 from .emails import (
     send_new_message_email,
     send_po_issued_email,
+    send_po_to_accounting,
     send_purchase_request_created_emails,
     send_quote_confirmed_email,
     send_quotes_collected_email,
@@ -530,9 +531,12 @@ def purchase_detail(request, pk):
             pr.save()
             pr.activities.create(message=f"Orden de compra {pr.po_number} emitida")
             send_po_issued_email(pr)
+            send_po_to_accounting(pr)
+            notified = pr.requester_name
+            if settings.PURCHASE_ACCOUNTING_EMAILS:
+                notified += " y a contabilidad"
             messages.success(
-                request,
-                f"OC {pr.po_number} emitida. Le avisamos a {pr.requester_name}.",
+                request, f"OC {pr.po_number} emitida. Le avisamos a {notified}."
             )
     elif action == "close_request":
         if pr.status != PurchaseRequest.Status.PO_ISSUED:
