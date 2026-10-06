@@ -410,5 +410,6 @@ def kpi_scorecard(request):
             "month": month,
             "active_nav": "kpi",
             "po_target_hours": settings.KPI_SETTINGS["PO_TARGET_HOURS"],
+            "currency": settings.DEFAULT_CURRENCY,
         },
     )

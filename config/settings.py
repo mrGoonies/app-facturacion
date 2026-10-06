@@ -212,6 +212,11 @@ ANYMAIL = {
 }
 
 
+# Pre-filled currency for supplier quotes, and the currency the bonus is
+# shown in on the KPI scorecard.
+DEFAULT_CURRENCY = config("DEFAULT_CURRENCY", default="CLP")
+
+
 # KPI targets and bonus formula — see tracker/kpi.py. Kept here so the
 # business rules the design assumed (48h/2h/8h/2%, weighted score, base
 # bonus) are configurable without touching code.

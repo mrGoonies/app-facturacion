@@ -26,7 +26,8 @@ def _quotes_summary(pr) -> str:
     lines = []
     for q in pr.quotes.all():
         total = (
-            f"{q.currency} {q.total_amount:,.2f}"
+            # CLP has no minor unit, so no decimals for it.
+            f"{q.currency} {q.total_amount:,.{0 if q.currency == 'CLP' else 2}f}"
             if q.total_amount
             else "monto no capturado"
         )

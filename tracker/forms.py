@@ -1,6 +1,7 @@
 import re
 
 from django import forms
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.contrib.auth.forms import AuthenticationForm
@@ -205,6 +206,10 @@ class SupplierQuoteForm(StyledFormMixin, forms.ModelForm):
             "lead_time_days",
             "payment_terms",
         ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["currency"].initial = settings.DEFAULT_CURRENCY
 
     def clean_quote_pdf(self):
         pdf = self.cleaned_data.get("quote_pdf")

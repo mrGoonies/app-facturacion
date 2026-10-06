@@ -60,7 +60,7 @@
 <div class="card" style="margin-top:var(--space-6);background:var(--color-accent-100);flex-direction:row;align-items:center;gap:var(--space-8);padding:var(--space-4) var(--space-6)">
   <div>
     <div class="card-kicker" style="color:var(--color-accent-700)">Bono a pagar</div>
-    <div style="font-family:var(--font-heading);font-size:34px">MXN {{ card.bonus_payable|floatformat:0|intcomma }}</div>
+    <div style="font-family:var(--font-heading);font-size:34px">{{ currency }} {{ card.bonus_payable|floatformat:0|intcomma }}</div>
   </div>
   <div style="font-size:13px" class="text-muted">
     {% if card.attainment < card.bonus_threshold_pct %}

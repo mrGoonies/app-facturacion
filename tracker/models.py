@@ -196,7 +196,7 @@ class SupplierQuote(models.Model):
     total_amount = models.DecimalField(
         max_digits=12, decimal_places=2, blank=True, null=True
     )
-    currency = models.CharField(max_length=8, default="MXN", blank=True)
+    currency = models.CharField(max_length=8, default="CLP", blank=True)
     lead_time_days = models.PositiveIntegerField(blank=True, null=True)
     payment_terms = models.CharField(max_length=80, blank=True)
     received_at = models.DateTimeField(default=timezone.now)
