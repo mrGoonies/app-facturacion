@@ -1,6 +1,8 @@
 import re
 
 from django import forms
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.contrib.auth.forms import AuthenticationForm
 from django.forms import inlineformset_factory
 
@@ -10,9 +12,14 @@ from .models import (
     PurchaseRequest,
     PurchaseRequestItem,
     SupplierQuote,
+    PickingList,
 )
 
-PL_NUMBER_RE = re.compile(r"[A-Za-z]*-?\d+")
+# A letter prefix may be joined to the number by a hyphen or a space
+# ("PL-1003", "PL 1003"), but a bare number never absorbs the separator in
+# front of it — otherwise "1001, 1002" would yield "-1002". Must match
+# TOKEN_RE in logistics_handoff_form.html.
+PL_NUMBER_RE = re.compile(r"[A-Za-z]+[ \t-]?\d+|\d+")
 
 UNIT_CHOICES = [
     ("", "Selecciona…"),
@@ -57,7 +64,19 @@ class BrandedAuthenticationForm(StyledFormMixin, AuthenticationForm):
 
 
 class PurchaseRequestForm(StyledFormMixin, forms.ModelForm):
-    needed_by = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
+    needed_by = forms.DateField(
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["needed_by"].widget.attrs["min"] = timezone.localdate().isoformat()
+
+    def clean_needed_by(self):
+        value = self.cleaned_data["needed_by"]
+        if value < timezone.localdate():
+            raise forms.ValidationError("La fecha debe ser hoy o una fecha futura.")
+        return value
 
     class Meta:
         model = PurchaseRequest
@@ -114,6 +133,8 @@ class PurchaseRequestItemForm(StyledFormMixin, forms.ModelForm):
 
     def clean(self):
         cleaned = super().clean()
+        if cleaned.get("description") and not cleaned.get("unit"):
+            self.add_error("unit", "Selecciona una unidad.")
         if cleaned.get("unit") == "other":
             other = (cleaned.get("unit_other") or "").strip()
             if not other:
@@ -129,11 +150,15 @@ PurchaseRequestItemFormSet = inlineformset_factory(
     form=PurchaseRequestItemForm,
     extra=2,
     can_delete=True,
+    min_num=1,
+    validate_min=True,
 )
 
 
 class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
-    shipped_on = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
+    shipped_on = forms.DateField(
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"})
+    )
     list_numbers = forms.CharField(
         widget=forms.Textarea(
             attrs={"rows": 2, "placeholder": "PL-8836, PL-8837, PL-8838 …"}
@@ -147,7 +172,7 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
 
     def clean_list_numbers(self):
         raw = self.cleaned_data["list_numbers"]
-        numbers = [n.upper() for n in PL_NUMBER_RE.findall(raw)]
+        numbers = [re.sub(r"[ \t]+", "-", n.upper()) for n in PL_NUMBER_RE.findall(raw)]
         if not numbers:
             raise forms.ValidationError(
                 "Ingresa al menos un número de lista de picking."
@@ -157,6 +182,15 @@ class LogisticsHandoffForm(StyledFormMixin, forms.ModelForm):
             if n not in seen:
                 seen.add(n)
                 deduped.append(n)
+        existing = set(
+            PickingList.objects.filter(number__in=deduped).values_list(
+                "number", flat=True
+            )
+        )
+        if existing:
+            raise forms.ValidationError(
+                f"Ya registradas: {', '.join(sorted(existing))}. Quítalas para continuar."
+            )
         return deduped
 
 

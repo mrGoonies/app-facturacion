@@ -16,7 +16,7 @@
     <p class="text-muted" style="font-size:14px">Compras está solicitando cotizaciones a proveedores.</p>
   {% elif pr.status == 'awaiting_confirmation' %}
     <h3 style="margin:14px 0 4px">Cotizaciones recibidas</h3>
-    <p class="text-muted" style="font-size:14px">Te compartimos {{ pr.quotes.count }} {% if pr.quotes.count == 1 %}cotización{% else %}cotizaciones{% endif %} por correo — revísalas abajo y respóndenos para confirmar cuál prefieres. Emitimos la orden de compra en cuanto tengamos tu confirmación.</p>
+    <p class="text-muted" style="font-size:14px">Elige abajo la cotización que prefieres. Emitiremos la orden de compra después de tu confirmación.</p>
   {% elif pr.status == 'po_issued' %}
     <h3 style="margin:14px 0 4px">Orden de compra emitida</h3>
     <p class="text-muted" style="font-size:14px">{{ pr.po_number }} fue emitida con {{ pr.selected_quote.supplier_name }}.</p>
@@ -50,7 +50,7 @@
       <div style="{% if not forloop.first %}border-top:1px solid var(--color-divider);padding-top:var(--space-2){% endif %}">
         <div style="display:flex;justify-content:space-between;align-items:baseline">
           <strong>{{ quote.supplier_name }}</strong>
-          {% if quote.selected %}<span class="tag" style="background:var(--color-accent);color:#fff">Confirmada</span>{% endif %}
+          {% if quote.selected and pr.confirmed_at %}<span class="tag" style="background:var(--color-accent);color:#fff">Confirmada</span>{% endif %}
         </div>
         <div class="text-muted" style="font-size:12px">
           {% if quote.total_amount %}{{ quote.currency }} {{ quote.total_amount|floatformat:0 }} · {% endif %}
@@ -58,6 +58,7 @@
           {% if quote.quote_pdf %}<a href="{{ quote.quote_pdf.url }}" target="_blank" rel="noopener">Ver PDF</a>{% endif %}
         </div>
       </div>
+      {% if pr.status == 'awaiting_confirmation' and not pr.confirmed_at %}<form method="post" style="margin-top:8px">{% csrf_token %}<input type="hidden" name="action" value="confirm_quote"><input type="hidden" name="quote_id" value="{{ quote.pk }}"><button class="btn btn-primary" type="submit">Elegir esta cotización</button></form>{% endif %}
       {% endfor %}
     </div>
   </div>

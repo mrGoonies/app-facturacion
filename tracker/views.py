@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.contrib import messages
+from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -59,6 +60,18 @@ def purchase_request_create(request):
 
 def request_status(request, token):
     pr = get_object_or_404(PurchaseRequest, token=token)
+    if request.method == "POST" and request.POST.get("action") == "confirm_quote":
+        if pr.status != PurchaseRequest.Status.AWAITING_CONFIRMATION or pr.confirmed_at:
+            messages.error(request, "Esta solicitud ya no acepta confirmaciones.")
+        else:
+            quote = get_object_or_404(SupplierQuote, pk=request.POST.get("quote_id"), request=pr)
+            pr.quotes.update(selected=False)
+            quote.selected = True
+            quote.save(update_fields=["selected"])
+            pr.confirmed_at = timezone.now()
+            pr.save(update_fields=["confirmed_at"])
+            pr.activities.create(message=f"{pr.requester_name} eligió la cotización de {quote.supplier_name}")
+        return redirect(pr.get_status_url())
     return render(request, "tracker/request_status.html", {"pr": pr})
 
 
@@ -66,23 +79,18 @@ def logistics_handoff_create(request):
     if request.method == "POST":
         form = LogisticsHandoffForm(request.POST)
         if form.is_valid():
-            batch = form.save()
-            now = timezone.now()
-            for number in form.cleaned_data["list_numbers"]:
-                PickingList.objects.update_or_create(
-                    number=number,
-                    defaults={
-                        "batch": batch,
-                        "handed_off_at": now,
-                    },
-                )
+            with transaction.atomic():
+                batch = form.save()
+                now = timezone.now()
+                for number in form.cleaned_data["list_numbers"]:
+                    PickingList.objects.create(number=number, batch=batch, handed_off_at=now)
             messages.success(
                 request,
                 f"Se entregaron {len(form.cleaned_data['list_numbers'])} listas.",
             )
             return redirect("tracker:logistics_handoff")
     else:
-        form = LogisticsHandoffForm(initial={"shipped_on": date.today()})
+        form = LogisticsHandoffForm(initial={"shipped_on": timezone.localdate()})
 
     recent_batches = PickingListBatch.objects.prefetch_related(
         "lists", "lists__errors"
@@ -264,20 +272,11 @@ def purchase_detail(request, pk):
                     request,
                     "Revisa la cotización — falta adjuntar el PDF o algún dato no es válido.",
                 )
-        elif action == "select_quote":
-            quote_id = request.POST.get("quote_id")
-            pr.quotes.update(selected=False)
-            quote = get_object_or_404(SupplierQuote, pk=quote_id, request=pr)
-            quote.selected = True
-            quote.save()
-            pr.activities.create(
-                message=f"Cotización seleccionada de {quote.supplier_name}"
-            )
         elif action == "send_quotes_to_requester":
-            if not pr.quotes.exists():
+            if pr.quotes.count() < settings.KPI_SETTINGS["MIN_QUOTES"]:
                 messages.error(
                     request,
-                    "Agrega al menos una cotización antes de enviarla al solicitante.",
+                    f"Agrega al menos {settings.KPI_SETTINGS['MIN_QUOTES']} cotizaciones antes de enviarlas.",
                 )
             else:
                 send_quotes_collected_email(pr)
@@ -294,7 +293,7 @@ def purchase_detail(request, pk):
                     request,
                     "Envía las cotizaciones al solicitante y espera su confirmación antes de emitir la orden de compra.",
                 )
-            elif not selected:
+            elif not pr.confirmed_at or not selected:
                 messages.error(
                     request,
                     "Selecciona una cotización antes de emitir la orden de compra.",
@@ -312,6 +311,9 @@ def purchase_detail(request, pk):
             pr.save()
             pr.activities.create(message="Solicitud cerrada")
         elif action == "cancel_request":
+            if pr.status not in (PurchaseRequest.Status.REQUESTED, PurchaseRequest.Status.QUOTING, PurchaseRequest.Status.AWAITING_CONFIRMATION):
+                messages.error(request, "No se puede cancelar una solicitud con OC emitida.")
+                return redirect("tracker:purchase_detail", pk=pk)
             pr.status = PurchaseRequest.Status.CANCELLED
             pr.closed_at = timezone.now()
             pr.save()
@@ -338,13 +340,19 @@ def picking_list_detail(request, number):
             pl.handled_by = request.user
             pl.save()
         elif action == "issue_invoice":
-            invoice_number = request.POST.get("invoice_number") or f"F-{20000 + pl.pk}"
+            invoice_number = request.POST.get("invoice_number", "").strip()
+            if not invoice_number:
+                messages.error(request, "Ingresa el número de factura.")
+                return redirect("tracker:picking_list_detail", number=number)
             pl.invoice_number = invoice_number
             pl.invoiced_at = timezone.now()
             pl.status = PickingList.Status.INVOICED
             pl.handled_by = request.user
             pl.save()
         elif action == "report_error":
+            if not pl.invoiced_at:
+                messages.error(request, "Solo puedes reportar errores en listas facturadas.")
+                return redirect("tracker:picking_list_detail", number=number)
             error_form = BillingErrorForm(request.POST)
             if error_form.is_valid():
                 err = error_form.save(commit=False)
@@ -382,9 +390,14 @@ def kpi_scorecard(request):
     from django.utils.dates import MONTHS_3
 
     local_now = timezone.localtime(timezone.now())
-    year = int(request.GET.get("year", local_now.year))
-    month = int(request.GET.get("month", local_now.month))
-    card = compute_scorecard(year, month, user=request.user)
+    try:
+        year = int(request.GET.get("year", local_now.year))
+        month = int(request.GET.get("month", local_now.month))
+        if not 1 <= month <= 12:
+            raise ValueError
+    except (TypeError, ValueError):
+        year, month = local_now.year, local_now.month
+    card = compute_scorecard(year, month)
 
     months = [(local_now.year, m, MONTHS_3[m]) for m in range(1, local_now.month + 1)]
     return render(

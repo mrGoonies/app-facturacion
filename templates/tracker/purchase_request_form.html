@@ -13,11 +13,12 @@
   <form method="post" enctype="multipart/form-data" novalidate>
     {% csrf_token %}
     <div class="form-row-2" style="margin-top:var(--space-6)">
-      <div class="field"><label>Tu nombre</label>{{ form.requester_name }}</div>
-      <div class="field"><label>Correo para avisos</label>{{ form.requester_email }}</div>
-      <div class="field"><label>Departamento</label>{{ form.department }}</div>
-      <div class="field"><label>Fecha en que se necesita</label>{{ form.needed_by }}</div>
+      <div class="field"><label>Tu nombre</label>{{ form.requester_name }}{% include "tracker/_errors.html" with errors=form.requester_name.errors %}</div>
+      <div class="field"><label>Correo para avisos</label>{{ form.requester_email }}{% include "tracker/_errors.html" with errors=form.requester_email.errors %}</div>
+      <div class="field"><label>Departamento</label>{{ form.department }}{% include "tracker/_errors.html" with errors=form.department.errors %}</div>
+      <div class="field"><label>Fecha en que se necesita</label>{{ form.needed_by }}{% include "tracker/_errors.html" with errors=form.needed_by.errors %}</div>
     </div>
+    {% include "tracker/_errors.html" with errors=form.non_field_errors %}
 
     <div style="margin-top:var(--space-6)">
       <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:var(--space-2)">
@@ -27,27 +28,28 @@
         {{ formset.management_form }}
         {% for item_form in formset %}
         <div class="item-row">
-          <div class="field"><label>Descripción</label>{{ item_form.description }}</div>
-          <div class="field"><label>Cant.</label>{{ item_form.quantity }}</div>
+          <div class="field"><label>Descripción</label>{{ item_form.description }}{% include "tracker/_errors.html" with errors=item_form.description.errors %}</div>
+          <div class="field"><label>Cant.</label>{{ item_form.quantity }}{% include "tracker/_errors.html" with errors=item_form.quantity.errors %}</div>
           <div class="field">
             <label>Unidad</label>
             {{ item_form.unit }}
+            {% include "tracker/_errors.html" with errors=item_form.unit.errors %}
             <div class="unit-other-wrap" style="margin-top:6px">
               {{ item_form.unit_other }}
-              {% if item_form.unit_other.errors %}<ul class="error-list">{% for e in item_form.unit_other.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+              {% include "tracker/_errors.html" with errors=item_form.unit_other.errors %}
             </div>
           </div>
           <div class="field"><label>Foto (opcional)</label>{{ item_form.reference_image }}</div>
           {% if item_form.instance.pk %}<div>{{ item_form.DELETE }} <label class="text-muted" style="font-size:11px">eliminar</label></div>{% else %}<div></div>{% endif %}
           {{ item_form.id }}
-          {% if item_form.reference_image.errors %}<ul class="error-list" style="grid-column:1/-1">{% for e in item_form.reference_image.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+          {% if item_form.reference_image.errors or item_form.non_field_errors %}<ul class="error-list" style="grid-column:1/-1">{% for e in item_form.non_field_errors %}<li>{{ e }}</li>{% endfor %}{% for e in item_form.reference_image.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
         </div>
         {% endfor %}
       </div>
       {% if formset.non_form_errors %}<ul class="error-list">{% for e in formset.non_form_errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
     </div>
 
-    <div class="field" style="margin-top:var(--space-4)"><label>¿Para qué se necesita?</label>{{ form.justification }}</div>
+    <div class="field" style="margin-top:var(--space-4)"><label>¿Para qué se necesita?</label>{{ form.justification }}{% include "tracker/_errors.html" with errors=form.justification.errors %}</div>
 
     <div class="field" style="margin-top:var(--space-4)">
       <label>Imagen de referencia (opcional)</label>
@@ -62,6 +64,7 @@
         <label class="radio">{{ radio.tag }}<span class="dot"></span>{{ radio.choice_label }}</label>
         {% endfor %}
       </div>
+      {% include "tracker/_errors.html" with errors=form.urgency.errors %}
     </div>
 
     <div class="submit-row" style="margin-top:var(--space-6)">

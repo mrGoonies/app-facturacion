@@ -186,7 +186,7 @@ SITE_URL = config(
     "SITE_URL",
     default=f"https://{RENDER_EXTERNAL_HOSTNAME}"
     if RENDER_EXTERNAL_HOSTNAME
-    else "http://127.0.0.1:8080",
+else "http://127.0.0.1:8000",
 )
 
 # Mailchimp Transactional (formerly Mandrill — same API, django-anymail keeps
@@ -202,6 +202,8 @@ ANYMAIL = {
 # bonus) are configurable without touching code.
 KPI_SETTINGS = {
     "PO_TARGET_HOURS": config("KPI_PO_TARGET_HOURS", default=48, cast=int),
+    "PO_TARGET_HOURS_BY_URGENCY": {"standard": config("KPI_PO_TARGET_HOURS_STANDARD", default=120, cast=int), "priority": config("KPI_PO_TARGET_HOURS_PRIORITY", default=48, cast=int), "line_stopped": config("KPI_PO_TARGET_HOURS_LINE_STOPPED", default=8, cast=int)},
+    "MIN_QUOTES": config("KPI_MIN_QUOTES", default=2, cast=int),
     "IN_PROCESS_TARGET_HOURS": config(
         "KPI_IN_PROCESS_TARGET_HOURS", default=2, cast=int
     ),

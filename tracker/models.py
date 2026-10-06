@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 
 from cloudinary.models import CloudinaryField
 from django.conf import settings
@@ -17,7 +18,7 @@ class PurchaseRequest(models.Model):
     class Urgency(models.TextChoices):
         STANDARD = "standard", "Estándar — 5 días hábiles"
         PRIORITY = "priority", "Prioritaria — 48 horas"
-        LINE_STOPPED = "line_stopped", "Línea detenida"
+        LINE_STOPPED = "line_stopped", "Línea detenida — 8 horas"
 
     class Status(models.TextChoices):
         REQUESTED = "requested", "Solicitada"
@@ -65,6 +66,7 @@ class PurchaseRequest(models.Model):
         blank=True,
         help_text="Cuándo se le enviaron al solicitante las cotizaciones recopiladas para su confirmación.",
     )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
     po_issued_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
@@ -87,12 +89,14 @@ class PurchaseRequest(models.Model):
 
     @property
     def time_to_po(self):
-        end = self.po_issued_at or timezone.now()
+        end = self.po_issued_at or self.closed_at or timezone.now()
         return end - self.created_at
 
     @property
     def po_target_hours(self):
-        return settings.KPI_SETTINGS["PO_TARGET_HOURS"]
+        return settings.KPI_SETTINGS.get("PO_TARGET_HOURS_BY_URGENCY", {}).get(
+            self.urgency, settings.KPI_SETTINGS["PO_TARGET_HOURS"]
+        )
 
     @property
     def is_po_on_time(self):
@@ -100,6 +104,15 @@ class PurchaseRequest(models.Model):
             return None
         hours = (self.po_issued_at - self.created_at).total_seconds() / 3600
         return hours <= self.po_target_hours
+
+    def po_outcome(self, now=None):
+        """True = on time, False = late, None = still pending within its
+        target (not scorable yet, so the scorecard leaves it out)."""
+        if self.po_issued_at:
+            return self.is_po_on_time
+        now = now or timezone.now()
+        deadline = self.created_at + timedelta(hours=self.po_target_hours)
+        return False if now > deadline else None
 
     @property
     def is_open(self):
@@ -316,6 +329,21 @@ class PickingList(models.Model):
         if d is None:
             return None
         return d.total_seconds() / 3600 <= self.invoice_target_hours
+
+    # Same True/False/None contract as PurchaseRequest.po_outcome.
+    def in_process_outcome(self, now=None):
+        if self.in_process_at:
+            return self.is_in_process_on_time
+        now = now or timezone.now()
+        deadline = self.handed_off_at + timedelta(hours=self.in_process_target_hours)
+        return False if now > deadline else None
+
+    def invoice_outcome(self, now=None):
+        if self.invoiced_at:
+            return self.is_invoice_on_time
+        now = now or timezone.now()
+        deadline = self.handed_off_at + timedelta(hours=self.invoice_target_hours)
+        return False if now > deadline else None
 
     @property
     def open_error(self):

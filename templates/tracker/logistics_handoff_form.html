@@ -67,12 +67,15 @@
   var typer = document.querySelector('[data-pl-typer]');
   if (!wrap || !textarea || !typer) return;
 
-  var TOKEN_RE = /[A-Za-z]*-?\d+/g;
+  // Must match PL_NUMBER_RE in tracker/forms.py.
+  var TOKEN_RE = /[A-Za-z]+[ \t-]?\d+|\d+/g;
   var countEl = document.querySelector('[data-pl-count]');
   var helpEl = document.querySelector('[data-pl-help]');
 
+  function normalize(n) { return n.toUpperCase().replace(/[ \t]+/, '-'); }
+
   var numbers = (textarea.value.match(TOKEN_RE) || []).reduce(function (acc, n) {
-    n = n.toUpperCase();
+    n = normalize(n);
     if (acc.indexOf(n) === -1) acc.push(n);
     return acc;
   }, []);
@@ -118,7 +121,7 @@
     var added = false;
     var dupes = [];
     matches.forEach(function (m) {
-      var number = m.toUpperCase();
+      var number = normalize(m);
       if (numbers.indexOf(number) === -1) {
         numbers.push(number);
         added = true;
@@ -134,6 +137,9 @@
   }
 
   typer.addEventListener('keydown', function (e) {
+    // A space right after a bare prefix ("PL") is part of the number
+    // ("PL 1003"), not a separator — let it be typed.
+    if (e.key === ' ' && /^[A-Za-z]+$/.test(typer.value)) return;
     if (e.key === 'Enter' || e.key === ',' || e.key === ' ') {
       e.preventDefault();
       if (typer.value.trim()) {

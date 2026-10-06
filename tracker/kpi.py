@@ -85,28 +85,28 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
     start, end = month_bounds(year, month)
 
     requests_qs = PurchaseRequest.objects.filter(
-        po_issued_at__isnull=False, po_issued_at__range=(start, end)
-    )
+        created_at__range=(start, end)
+    ).exclude(status=PurchaseRequest.Status.CANCELLED)
     if user is not None:
         requests_qs = requests_qs.filter(handled_by=user)
     requests = list(requests_qs)
 
+    completed_po = [r for r in requests if r.po_issued_at]
     po_hours = [
-        (r.po_issued_at - r.created_at).total_seconds() / 3600 for r in requests
+        (r.po_issued_at - r.created_at).total_seconds() / 3600 for r in completed_po
     ]
-    po_on_time_flags = [r.is_po_on_time for r in requests]
+    # Pending requests (None) aren't scorable yet — only decided ones count.
+    po_on_time_flags = [o for o in (r.po_outcome() for r in requests) if o is not None]
     avg_po_hours = sum(po_hours) / len(po_hours) if po_hours else None
     po_on_time_rate = _on_time_rate(po_on_time_flags)
 
     lists_qs = PickingList.objects.filter(
         handed_off_at__range=(start, end)
     ).select_related("batch")
-    if user is not None:
-        lists_qs = lists_qs.filter(handled_by=user)
     lists = list(lists_qs)
 
     in_process_on_time_rate = _on_time_rate(
-        [l.is_in_process_on_time for l in lists if l.is_in_process_on_time is not None]
+        [o for o in (l.in_process_outcome() for l in lists) if o is not None]
     )
 
     invoiced_lists = [l for l in lists if l.hand_off_to_invoice is not None]
@@ -119,7 +119,7 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
     )
 
     errors_qs = BillingError.objects.filter(
-        reported_at__range=(start, end), disputed=False
+        picking_list__handed_off_at__range=(start, end), disputed=False
     ).select_related("picking_list")
     if user is not None:
         errors_qs = errors_qs.filter(picking_list__handled_by=user)
@@ -128,7 +128,7 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
 
     indicators = [
         IndicatorScore(
-            label=f"Orden de compra emitida dentro de {cfg['PO_TARGET_HOURS']} h desde la solicitud",
+            label="Orden de compra emitida dentro de la meta según urgencia",
             target_label=f"≥ {cfg['PO_ON_TIME_TARGET']:.0%} a tiempo",
             actual_label=f"{po_on_time_rate:.0%}"
             if po_on_time_rate is not None
@@ -198,7 +198,7 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
         month=month,
         avg_po_hours=avg_po_hours,
         po_on_time_count=sum(po_on_time_flags),
-        po_total_count=len(po_hours),
+        po_total_count=len(po_on_time_flags),
         avg_invoice_hours=avg_invoice_hours,
         invoice_lists_count=len(lists),
         error_rate=error_rate,
