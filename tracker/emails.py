@@ -13,6 +13,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.urls import reverse
+from django.utils import timezone
 
 
 def _absolute_url(path: str) -> str:
@@ -119,15 +120,29 @@ def send_quotes_collected_email(pr, reminder=False):
         if reminder
         else f"Reunimos estas cotizaciones para tu solicitud {pr.display_ref}:"
     )
+    single_source = (
+        f"Solo conseguimos {pr.quotes.count()} cotización(es): {pr.single_source_reason}\n\n"
+        if pr.single_source_reason
+        else ""
+    )
+    deadline = ""
+    if pr.auto_cancel_at:
+        cancel_at = timezone.localtime(pr.auto_cancel_at)
+        deadline = (
+            f"\nSi no eliges antes del {cancel_at:%d/%m a las %H:%M}, "
+            f"la solicitud se cancelará automáticamente.\n"
+        )
     _send_to_requester(
         pr,
         subject,
         f"Hola {pr.requester_name},\n\n"
         f"{intro}\n\n"
         f"{_quotes_summary(pr)}\n\n"
+        f"{single_source}"
         f"Elige tu cotización aquí — en cuanto la elijas emitimos la orden de compra:\n"
         f"{status_url}\n\n"
-        f"Si ninguna te sirve, desde el mismo link puedes pedir otras.\n",
+        f"Si ninguna te sirve, desde el mismo link puedes pedir otras.\n"
+        f"{deadline}",
     )
 
 
@@ -194,6 +209,25 @@ def send_request_cancelled_email(pr, by_requester=False, reason=""):
             f"Tu solicitud de compra {pr.display_ref} fue cancelada.\n"
             f"{reason_text}\nDetalle:\n{_absolute_url(pr.get_status_url())}\n",
         )
+
+
+def send_request_auto_cancelled_email(pr, days):
+    """Both sides hear about it: nobody chose to cancel this one."""
+    _send_to_requester(
+        pr,
+        f"Solicitud cancelada por falta de respuesta ({pr.display_ref})",
+        f"Hola {pr.requester_name},\n\n"
+        f"Cancelamos tu solicitud {pr.display_ref} porque pasaron {days} días "
+        f"sin que eligieras una cotización.\n\n"
+        f"Si todavía lo necesitas, puedes repetirla desde aquí:\n"
+        f"{_absolute_url(reverse('tracker:purchase_request_repeat', args=[pr.token]))}\n",
+    )
+    _send_to_staff(
+        f"{pr.display_ref}: cancelada automáticamente",
+        f"{pr.display_ref} ({pr.requester_name}) se canceló porque pasaron "
+        f"{days} días sin que el solicitante eligiera cotización.\n\n"
+        f"Ver la solicitud:\n{_detail_url(pr)}\n",
+    )
 
 
 def send_new_message_email(pr, activity):

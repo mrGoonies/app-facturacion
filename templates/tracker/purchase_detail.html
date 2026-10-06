@@ -11,6 +11,7 @@
     <div class="text-muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em">Tiempo a OC</div>
     <div style="font-family:var(--font-heading);font-size:28px;line-height:1.1">{{ pr.time_to_po|hm }}</div>
     <div class="text-muted" style="font-size:12px">de meta {{ pr.po_target_hours }} h</div>
+    {% if pr.is_paused %}<div class="tag tag-neutral" style="margin-top:4px">En pausa: esperando a {{ pr.requester_name }}</div>{% endif %}
     {% if pr.can_cancel %}
     <form method="post" style="margin-top:var(--space-2)" onsubmit="return confirm('¿Cancelar esta solicitud de compra?');">
       {% csrf_token %}<input type="hidden" name="action" value="cancel_request">
@@ -80,11 +81,24 @@
       <button class="btn btn-secondary btn-block" type="submit">Agregar cotización</button>
     </form>
     {% if pr.status == 'quoting' and pr.quotes.exists %}
+    {% if pr.quotes.count >= min_quotes %}
     <form method="post" style="margin-top:var(--space-3)">
       {% csrf_token %}
       <input type="hidden" name="action" value="send_quotes_to_requester">
       <button class="btn btn-primary btn-block" type="submit">Enviar cotizaciones a {{ pr.requester_name }} para confirmar</button>
     </form>
+    {% else %}
+    <p class="text-muted" style="font-size:12px;margin-top:var(--space-3)">Llevas {{ pr.quotes.count }} de {{ min_quotes }} cotizaciones. Agrega otra para enviarlas.</p>
+    <details class="disclosure">
+      <summary>No hay más proveedores — enviar igual</summary>
+      <form method="post">
+        {% csrf_token %}<input type="hidden" name="action" value="send_quotes_to_requester">
+        <label class="text-muted" for="single-source-reason" style="font-size:12px">¿Por qué no hay más cotizaciones? {{ pr.requester_name }} verá este motivo.</label>
+        <textarea class="input" id="single-source-reason" name="single_source_reason" rows="2" maxlength="2000" required></textarea>
+        <button class="btn btn-primary" type="submit">Enviar a {{ pr.requester_name }} con justificación</button>
+      </form>
+    </details>
+    {% endif %}
     <p class="text-muted" style="font-size:12px;margin-top:4px">Le llegará un correo con proveedor, total y el PDF de cada cotización, y un link para elegir la que prefiere. Cuando la elija podrás emitir la OC.</p>
     {% endif %}
     {% endif %}
@@ -173,7 +187,7 @@
 
     <div class="card" style="margin-top:var(--space-6);background:var(--color-accent-100)">
       <span class="card-kicker" style="color:var(--color-accent-700)">Cuenta para el KPI</span>
-      <p class="card-body" style="opacity:1">Solicitud → OC emitida, meta {{ pr.po_target_hours }} h.
+      <p class="card-body" style="opacity:1">Solicitud → OC emitida, meta {{ pr.po_target_hours }} h. No cuenta el tiempo que {{ pr.requester_name }} tarda en elegir cotización{% if pr.paused_time %} (hasta ahora {{ pr.paused_time|hm }}){% endif %}.
         {% if pr.is_po_on_time is not None %}{% if pr.is_po_on_time %}A tiempo.{% else %}Meta no cumplida.{% endif %}{% endif %}</p>
     </div>
   </div>

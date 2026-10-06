@@ -19,7 +19,7 @@
     <p class="text-muted" style="font-size:14px">Elegiste {{ pr.selected_quote.supplier_name }}. Compras emitirá la orden de compra y te avisará por correo.</p>
   {% elif pr.status == 'awaiting_confirmation' %}
     <h3 style="margin:14px 0 4px">Elige tu cotización</h3>
-    <p class="text-muted" style="font-size:14px">Elige abajo la cotización que prefieres. Emitiremos la orden de compra después de tu confirmación.</p>
+    <p class="text-muted" style="font-size:14px">Elige abajo la cotización que prefieres. Emitiremos la orden de compra después de tu confirmación.{% if pr.auto_cancel_at %} Si no eliges antes del {{ pr.auto_cancel_at|date:"d M H:i" }}, la solicitud se cancelará automáticamente.{% endif %}</p>
   {% elif pr.status == 'po_issued' %}
     <h3 style="margin:14px 0 4px">Orden de compra emitida</h3>
     <p class="text-muted" style="font-size:14px">{{ pr.po_number }} fue emitida con {{ pr.selected_quote.supplier_name }}.{% if pr.po_pdf %} <a href="{{ pr.po_pdf.url }}" target="_blank" rel="noopener">Ver la OC (PDF)</a>{% endif %}</p>
@@ -38,6 +38,7 @@
   {% if pr.quotes.exists and pr.status != 'requested' and pr.status != 'quoting' %}
   <div class="card" style="margin-top:var(--space-6)">
     <span class="card-kicker">Cotizaciones recibidas</span>
+    {% if pr.single_source_reason %}<p class="text-muted" style="font-size:12px;margin:0">Solo conseguimos {{ pr.quotes.count }} cotización{{ pr.quotes.count|pluralize:"es" }}: {{ pr.single_source_reason }}</p>{% endif %}
     <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:13px">
       {% for quote in pr.quotes.all %}
       <div style="{% if not forloop.first %}border-top:1px solid var(--color-divider);padding-top:var(--space-2){% endif %}">

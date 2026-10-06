@@ -1,4 +1,5 @@
 from datetime import timedelta
+from io import StringIO
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -280,6 +281,7 @@ class PurchaseFlowStaffTests(TestCase):
         self.assertEqual(set(refs[-2:]), {waiting.display_ref, issued.display_ref})
         self.assertContains(resp, "Lista para emitir OC")
         self.assertContains(resp, "Esperando al solicitante")
+        self.assertContains(resp, "En pausa")
         self.assertContains(resp, "Esperando recepción")
         self.assertEqual(resp.context["stats"]["ready_to_issue"], 1)
 
@@ -461,3 +463,164 @@ class PurchaseFlowRequesterTests(TestCase):
         self.assertContains(resp, 'value="Lentes"')
         # A non-standard unit comes back through "Otro" instead of being lost.
         self.assertContains(resp, 'value="Par"')
+
+
+class PoClockPauseTests(TestCase):
+    """The request → PO clock stops while the quotes sit with the requester,
+    so their think-time doesn't count against the assistant."""
+
+    def _waiting(self, created_hours_ago, sent_hours_ago, **fields):
+        now = timezone.now()
+        pr = _make_request(
+            urgency=PurchaseRequest.Urgency.LINE_STOPPED,  # 8 h target
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            quotes_sent_at=now - timedelta(hours=sent_hours_ago),
+            **fields,
+        )
+        PurchaseRequest.objects.filter(pk=pr.pk).update(
+            created_at=now - timedelta(hours=created_hours_ago)
+        )
+        pr.refresh_from_db()
+        return pr
+
+    def test_waiting_on_requester_does_not_count(self):
+        pr = self._waiting(created_hours_ago=10, sent_hours_ago=6)
+        self.assertIsNone(pr.po_outcome())
+        self.assertAlmostEqual(pr.po_hours_left(), 4, places=1)
+        self.assertTrue(pr.is_paused)
+
+    @override_settings(
+        KPI_SETTINGS={
+            **settings.KPI_SETTINGS,
+            "PO_PAUSE_WHILE_AWAITING_REQUESTER": False,
+        }
+    )
+    def test_pause_can_be_turned_off(self):
+        pr = self._waiting(created_hours_ago=10, sent_hours_ago=6)
+        self.assertIs(pr.po_outcome(), False)
+
+    def test_confirmation_banks_the_wait_and_po_is_on_time(self):
+        pr = self._waiting(created_hours_ago=10, sent_hours_ago=5)
+        quote = pr.quotes.create(supplier_name="Barato")
+        self.client.post(
+            pr.get_status_url(), {"action": "confirm_quote", "quote_id": quote.pk}
+        )
+        pr.refresh_from_db()
+        self.assertAlmostEqual(
+            pr.requester_wait_time.total_seconds() / 3600, 5, places=1
+        )
+        PurchaseRequest.objects.filter(pk=pr.pk).update(
+            status=PurchaseRequest.Status.PO_ISSUED, po_issued_at=timezone.now()
+        )
+        pr.refresh_from_db()
+        self.assertIs(pr.is_po_on_time, True)
+
+    def test_each_round_with_the_requester_adds_up(self):
+        pr = self._waiting(created_hours_ago=10, sent_hours_ago=3)
+        self.client.post(
+            pr.get_status_url(), {"action": "reject_quotes", "body": "Muy caras"}
+        )
+        PurchaseRequest.objects.filter(pk=pr.pk).update(
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            quotes_sent_at=timezone.now() - timedelta(hours=2),
+        )
+        pr.refresh_from_db()
+        self.assertAlmostEqual(pr.paused_time().total_seconds() / 3600, 5, places=1)
+
+
+@PLAIN_STATIC
+class SingleSourceQuoteTests(TestCase):
+    def setUp(self):
+        self.client.force_login(
+            get_user_model().objects.create_user(
+                "asistente", password="x", is_staff=True
+            )
+        )
+        self.pr = _make_request(status=PurchaseRequest.Status.QUOTING)
+        self.pr.quotes.create(supplier_name="Único")
+
+    def _send(self, **data):
+        return self.client.post(
+            reverse("tracker:purchase_detail", args=[self.pr.pk]),
+            {"action": "send_quotes_to_requester", **data},
+        )
+
+    def test_below_minimum_needs_a_reason(self):
+        self._send()
+        self.pr.refresh_from_db()
+        self.assertEqual(self.pr.status, PurchaseRequest.Status.QUOTING)
+
+    def test_reason_lets_it_through_and_reaches_requester(self):
+        self._send(single_source_reason="Distribuidor exclusivo de la marca")
+        self.pr.refresh_from_db()
+        self.assertEqual(self.pr.status, PurchaseRequest.Status.AWAITING_CONFIRMATION)
+        self.assertEqual(
+            self.pr.single_source_reason, "Distribuidor exclusivo de la marca"
+        )
+        self.assertIn("Distribuidor exclusivo de la marca", mail.outbox[-1].body)
+        resp = self.client.get(self.pr.get_status_url())
+        self.assertContains(resp, "Distribuidor exclusivo de la marca")
+
+    def test_reason_is_dropped_when_minimum_is_met(self):
+        self.pr.quotes.create(supplier_name="Otro")
+        self._send(single_source_reason="No aplica")
+        self.pr.refresh_from_db()
+        self.assertEqual(self.pr.single_source_reason, "")
+
+
+class StaleRequestCommandTests(TestCase):
+    def setUp(self):
+        get_user_model().objects.create_user(
+            "asistente", email="compras@example.com", password="x", is_staff=True
+        )
+
+    def _waiting(self, hours, **fields):
+        return _make_request(
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            quotes_sent_at=timezone.now() - timedelta(hours=hours),
+            **fields,
+        )
+
+    def _run(self):
+        from django.core.management import call_command
+
+        call_command("process_stale_purchase_requests", stdout=StringIO())
+
+    def test_reminds_once_per_round(self):
+        pr = self._waiting(hours=49)
+        self._run()
+        self._run()
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["pedro@example.com"])
+        self.assertIn("se cancelará automáticamente", mail.outbox[0].body)
+        pr.refresh_from_db()
+        self.assertIsNotNone(pr.reminded_at)
+
+    def test_manual_reminder_counts(self):
+        self._waiting(hours=49, reminded_at=timezone.now() - timedelta(hours=1))
+        self._run()
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_leaves_recent_and_confirmed_requests_alone(self):
+        self._waiting(hours=10)
+        self._waiting(hours=24 * 8, confirmed_at=timezone.now())
+        self._run()
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_cancels_after_the_limit_and_tells_both_sides(self):
+        pr = self._waiting(hours=24 * 7 + 1)
+        self._run()
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.CANCELLED)
+        self.assertEqual(
+            {tuple(m.to) for m in mail.outbox},
+            {("pedro@example.com",), ("compras@example.com",)},
+        )
+
+    @override_settings(PURCHASE_AUTO_CANCEL_DAYS=0, PURCHASE_AUTO_REMIND_HOURS=0)
+    def test_zero_turns_both_steps_off(self):
+        pr = self._waiting(hours=24 * 30)
+        self._run()
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.AWAITING_CONFIRMATION)
+        self.assertEqual(len(mail.outbox), 0)

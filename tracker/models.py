@@ -75,6 +75,19 @@ class PurchaseRequest(models.Model):
         help_text="Cuándo se le enviaron al solicitante las cotizaciones recopiladas para su confirmación.",
     )
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    reminded_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Último recordatorio enviado al solicitante para elegir cotización.",
+    )
+    requester_wait_time = models.DurationField(
+        default=timedelta,
+        help_text="Tiempo acumulado esperando que el solicitante respondiera a las cotizaciones.",
+    )
+    single_source_reason = models.TextField(
+        blank=True,
+        help_text="Por qué se enviaron menos cotizaciones que el mínimo (p. ej. proveedor único).",
+    )
     po_issued_at = models.DateTimeField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
 
@@ -95,10 +108,45 @@ class PurchaseRequest(models.Model):
     def selected_quote(self):
         return self.quotes.filter(selected=True).first()
 
+    def end_requester_wait(self, now):
+        """Banks the round that just ended (the requester answered, or the
+        request was cancelled while waiting) into `requester_wait_time`.
+        Callers save the field."""
+        if self.awaiting_requester and self.quotes_sent_at:
+            self.requester_wait_time += now - self.quotes_sent_at
+
+    def paused_time(self, now=None):
+        """Requester think-time excluded from the PO KPI: every finished
+        round plus the one still open. Zero when the pause is turned off."""
+        if not settings.KPI_SETTINGS["PO_PAUSE_WHILE_AWAITING_REQUESTER"]:
+            return timedelta()
+        paused = self.requester_wait_time
+        if self.awaiting_requester and self.quotes_sent_at:
+            paused += (now or timezone.now()) - self.quotes_sent_at
+        return paused
+
+    def po_elapsed(self, now=None):
+        """Time counted against the PO target: request → PO (or now), minus
+        the time spent waiting on the requester."""
+        end = self.po_issued_at or self.closed_at or now or timezone.now()
+        return end - self.created_at - self.paused_time(end)
+
     @property
     def time_to_po(self):
-        end = self.po_issued_at or self.closed_at or timezone.now()
-        return end - self.created_at
+        return self.po_elapsed()
+
+    @property
+    def auto_cancel_at(self):
+        """When the stale-request job will cancel this if nobody answers
+        (see process_stale_purchase_requests)."""
+        days = settings.PURCHASE_AUTO_CANCEL_DAYS
+        if not (days and self.awaiting_requester and self.quotes_sent_at):
+            return None
+        return self.quotes_sent_at + timedelta(days=days)
+
+    @property
+    def is_paused(self):
+        return self.awaiting_requester and bool(self.paused_time())
 
     @property
     def po_target_hours(self):
@@ -110,17 +158,17 @@ class PurchaseRequest(models.Model):
     def is_po_on_time(self):
         if not self.po_issued_at:
             return None
-        hours = (self.po_issued_at - self.created_at).total_seconds() / 3600
-        return hours <= self.po_target_hours
+        return self.po_elapsed().total_seconds() / 3600 <= self.po_target_hours
+
+    def po_hours_left(self, now=None):
+        return self.po_target_hours - self.po_elapsed(now).total_seconds() / 3600
 
     def po_outcome(self, now=None):
         """True = on time, False = late, None = still pending within its
         target (not scorable yet, so the scorecard leaves it out)."""
         if self.po_issued_at:
             return self.is_po_on_time
-        now = now or timezone.now()
-        deadline = self.created_at + timedelta(hours=self.po_target_hours)
-        return False if now > deadline else None
+        return False if self.po_hours_left(now) < 0 else None
 
     @property
     def is_open(self):

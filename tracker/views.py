@@ -118,8 +118,10 @@ def request_status(request, token):
             pr.quotes.update(selected=False)
             quote.selected = True
             quote.save(update_fields=["selected"])
-            pr.confirmed_at = timezone.now()
-            pr.save(update_fields=["confirmed_at"])
+            now = timezone.now()
+            pr.end_requester_wait(now)
+            pr.confirmed_at = now
+            pr.save(update_fields=["confirmed_at", "requester_wait_time"])
             pr.activities.create(
                 message=f"{pr.requester_name} eligió la cotización de {quote.supplier_name}"
             )
@@ -138,8 +140,9 @@ def request_status(request, token):
                 request, "Cuéntanos por qué no te sirven para buscar mejores."
             )
         else:
+            pr.end_requester_wait(timezone.now())
             pr.status = PurchaseRequest.Status.QUOTING
-            pr.save(update_fields=["status"])
+            pr.save(update_fields=["status", "requester_wait_time"])
             pr.activities.create(
                 message=f"{pr.requester_name} pidió otras cotizaciones"
             )
@@ -160,9 +163,10 @@ def request_status(request, token):
                 "Ya se emitió la orden de compra; escríbele a Compras para cancelarla.",
             )
         else:
-            pr.status = PurchaseRequest.Status.CANCELLED
             pr.closed_at = timezone.now()
-            pr.save(update_fields=["status", "closed_at"])
+            pr.end_requester_wait(pr.closed_at)
+            pr.status = PurchaseRequest.Status.CANCELLED
+            pr.save(update_fields=["status", "closed_at", "requester_wait_time"])
             pr.activities.create(message=f"Cancelada por {pr.requester_name}")
             if reason:
                 pr.activities.create(
@@ -296,8 +300,9 @@ def queue(request):
         if r.status == PurchaseRequest.Status.PO_ISSUED:
             label, css = "—", "tag-neutral"
         else:
-            remaining = r.po_target_hours - (now - r.created_at).total_seconds() / 3600
-            label, css = _time_left(remaining)
+            label, css = _time_left(r.po_hours_left(now))
+            if r.is_paused:
+                label = f"En pausa · {label}"
         status_label = r.staff_status_label
         if r.awaiting_requester and r.quotes_sent_at:
             waited = (now - r.quotes_sent_at).total_seconds() / 3600
@@ -419,6 +424,7 @@ def _render_purchase_detail(request, pr, quote_form=None, po_form=None):
             "pr": pr,
             "quote_form": quote_form or SupplierQuoteForm(),
             "po_form": po_form or IssuePOForm(),
+            "min_quotes": settings.KPI_SETTINGS["MIN_QUOTES"],
             "active_nav": "purchasing",
         },
     )
@@ -466,28 +472,45 @@ def purchase_detail(request, pk):
             )
             messages.success(request, f"Cotización de {quote.supplier_name} eliminada.")
     elif action == "send_quotes_to_requester":
+        min_quotes = settings.KPI_SETTINGS["MIN_QUOTES"]
+        quote_count = pr.quotes.count()
+        # Fewer quotes than the minimum are allowed only with a written
+        # reason (a single supplier, say) — it's shown to the requester and
+        # kept on the request for review.
+        reason = request.POST.get("single_source_reason", "").strip()[
+            :MESSAGE_MAX_LENGTH
+        ]
         if pr.status != PurchaseRequest.Status.QUOTING:
             messages.error(request, "Esta solicitud no está en etapa de cotización.")
-        elif pr.quotes.count() < settings.KPI_SETTINGS["MIN_QUOTES"]:
+        elif not quote_count:
+            messages.error(request, "Agrega al menos una cotización antes de enviarla.")
+        elif quote_count < min_quotes and not reason:
             messages.error(
                 request,
-                f"Agrega al menos {settings.KPI_SETTINGS['MIN_QUOTES']} cotizaciones antes de enviarlas.",
+                f"Agrega al menos {min_quotes} cotizaciones, o explica por qué no hay más proveedores.",
             )
         else:
             pr.quotes.update(selected=False)
             pr.status = PurchaseRequest.Status.AWAITING_CONFIRMATION
             pr.quotes_sent_at = timezone.now()
+            pr.single_source_reason = reason if quote_count < min_quotes else ""
             pr.save()
             send_quotes_collected_email(pr)
             pr.activities.create(
                 message=f"Cotizaciones enviadas a {pr.requester_name} para confirmación"
             )
+            if pr.single_source_reason:
+                pr.activities.create(
+                    message=f"Enviada con {quote_count} de {min_quotes} cotizaciones mínimas: {pr.single_source_reason}"
+                )
             messages.success(request, f"Cotizaciones enviadas a {pr.requester_name}.")
     elif action == "remind_requester":
         if not pr.awaiting_requester:
             messages.error(request, "Esta solicitud no está esperando al solicitante.")
         else:
             send_quotes_collected_email(pr, reminder=True)
+            pr.reminded_at = timezone.now()
+            pr.save(update_fields=["reminded_at"])
             pr.activities.create(message=f"Recordatorio enviado a {pr.requester_name}")
             messages.success(request, f"Recordatorio enviado a {pr.requester_name}.")
     elif action == "issue_po":
@@ -527,8 +550,9 @@ def purchase_detail(request, pk):
                 request, "No se puede cancelar una solicitud con OC emitida."
             )
         else:
-            pr.status = PurchaseRequest.Status.CANCELLED
             pr.closed_at = timezone.now()
+            pr.end_requester_wait(pr.closed_at)
+            pr.status = PurchaseRequest.Status.CANCELLED
             pr.save()
             pr.activities.create(message="Solicitud cancelada")
             send_request_cancelled_email(pr)

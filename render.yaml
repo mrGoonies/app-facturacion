@@ -31,3 +31,36 @@ services:
         sync: false
       - key: DEFAULT_FROM_EMAIL
         sync: false
+
+  # Hourly follow-up on quotes waiting on the requester: reminder after
+  # PURCHASE_AUTO_REMIND_HOURS, cancellation after PURCHASE_AUTO_CANCEL_DAYS
+  # (see tracker/management/commands/process_stale_purchase_requests.py).
+  - type: cron
+    name: app-facturacion-seguimiento-compras
+    runtime: python
+    schedule: "0 * * * *"
+    buildCommand: >-
+      pip install uv &&
+      uv sync --frozen
+    startCommand: uv run python manage.py process_stale_purchase_requests
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: app-facturacion-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "False"
+      # A cron job has no public hostname of its own, so the links in its
+      # emails need the web service's URL spelled out.
+      - key: SITE_URL
+        sync: false
+      - key: CLOUDINARY_URL
+        sync: false
+      - key: DJANGO_EMAIL_BACKEND
+        value: anymail.backends.mandrill.EmailBackend
+      - key: MAILCHIMP_API_KEY
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false

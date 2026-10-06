@@ -92,9 +92,8 @@ def compute_scorecard(year: int, month: int, user=None) -> Scorecard:
     requests = list(requests_qs)
 
     completed_po = [r for r in requests if r.po_issued_at]
-    po_hours = [
-        (r.po_issued_at - r.created_at).total_seconds() / 3600 for r in completed_po
-    ]
+    # po_elapsed leaves out the time spent waiting on the requester.
+    po_hours = [r.po_elapsed().total_seconds() / 3600 for r in completed_po]
     # Pending requests (None) aren't scorable yet — only decided ones count.
     po_on_time_flags = [o for o in (r.po_outcome() for r in requests) if o is not None]
     avg_po_hours = sum(po_hours) / len(po_hours) if po_hours else None
