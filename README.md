@@ -7,17 +7,14 @@ Internal tool to track two KPIs used for the administrative assistant's bonus:
    being marked "in process" and to the invoice being issued, plus billing
    errors and who they're attributable to.
 
-Built with Django + PostgreSQL. The public forms (purchase request, logistics
+Built with Django — SQLite for local development, PostgreSQL in production
+(Render). The public forms (purchase request, logistics
 hand-off, requester status page) need no login; the assistant's workspace
 (queue, purchase detail, picking list detail, KPI scorecard) is behind auth.
 
 ## Setup
 
 ```bash
-brew install postgresql@16          # if not already installed
-brew services start postgresql@16
-createdb app_facturacion
-
 uv sync
 uv run python manage.py migrate
 uv run python manage.py createsuperuser
@@ -27,9 +24,12 @@ uv run python manage.py runserver
 Visit `http://127.0.0.1:8000/` for the public landing page, or
 `http://127.0.0.1:8000/panel/` for the assistant workspace (login required).
 
-Configuration (DB credentials, KPI targets/weights/bonus) is read from
+Locally the database is `db.sqlite3` at the repo root (gitignored) — no
+server to install. Setting `DATABASE_URL` switches to that database instead.
+
+Configuration (KPI targets/weights/bonus) is read from
 environment variables with sensible local defaults — see
-`config/settings.py`'s `KPI_SETTINGS` and `DATABASES` for what's tunable.
+`config/settings.py`'s `KPI_SETTINGS` for what's tunable.
 
 Purchase request reference images are uploaded to Cloudinary. Set these env
 vars (e.g. in a local `.env`, already gitignored) from your Cloudinary

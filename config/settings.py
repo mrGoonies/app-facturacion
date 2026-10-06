@@ -94,18 +94,13 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': config('DB_NAME', default='app_facturacion'),
-        'USER': config('DB_USER', default=os.getenv('USER', 'postgres')),
-        'PASSWORD': config('DB_PASSWORD', default=''),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
 }
 
 # Render's managed Postgres is provisioned as a single DATABASE_URL — when
-# it's set (i.e. on Render), it overrides the discrete DB_* vars above,
-# which stay in charge for local dev.
+# it's set (i.e. on Render), it replaces the local SQLite database above.
 if config('DATABASE_URL', default=''):
     DATABASES['default'] = dj_database_url.config(conn_max_age=600, ssl_require=True)
 
@@ -187,7 +182,7 @@ DEFAULT_FROM_EMAIL = config(
 # Used to build absolute links (status page, panel links) inside emails.
 SITE_URL = config(
     'SITE_URL',
-    default=f'https://{RENDER_EXTERNAL_HOSTNAME}' if RENDER_EXTERNAL_HOSTNAME else 'http://127.0.0.1:8000',
+    default=f'https://{RENDER_EXTERNAL_HOSTNAME}' if RENDER_EXTERNAL_HOSTNAME else 'http://127.0.0.1:8080',
 )
 
 # Mailchimp Transactional (formerly Mandrill — same API, django-anymail keeps

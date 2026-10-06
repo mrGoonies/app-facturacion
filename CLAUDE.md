@@ -8,7 +8,7 @@ Internal Django 6.1 tool for Irritec that tracks the KPIs behind an administrati
 
 ## Commands
 
-Python 3.14 is managed with `uv`. The database is PostgreSQL even locally; there is no SQLite fallback. The default local DB is `app_facturacion` on localhost, owned by `$USER`.
+Python 3.14 is managed with `uv`. Local development uses SQLite (`db.sqlite3` at the repo root, gitignored). Production on Render uses PostgreSQL through `DATABASE_URL`. Keep models and queries database-agnostic: don't use `django.contrib.postgres` or other Postgres-only features.
 
 ```bash
 uv sync
@@ -19,9 +19,9 @@ uv run python manage.py test                 # all tests (tracker/tests.py is cu
 uv run python manage.py test tracker.tests.SomeTestCase.test_method   # single test
 ```
 
-Tests create a Postgres test DB, so the DB user needs CREATEDB. No linter or formatter is configured.
+No linter or formatter is configured.
 
-Settings come from env vars through `python-decouple` (a local `.env` is gitignored). On Render, `DATABASE_URL` overrides the discrete `DB_*` vars. Deployment is defined in `render.yaml`. Its build command runs `collectstatic` and `migrate`.
+Settings come from env vars through `python-decouple` (a local `.env` is gitignored). Setting `DATABASE_URL` switches the app from SQLite to that database. Deployment is defined in `render.yaml`. Its build command runs `collectstatic` and `migrate`.
 
 ## Architecture
 
