@@ -31,15 +31,14 @@ Configuration (KPI targets/weights/bonus) is read from
 environment variables with sensible local defaults — see
 `config/settings.py`'s `KPI_SETTINGS` for what's tunable.
 
-Purchase request reference images are uploaded to Cloudinary. Set these env
-vars (e.g. in a local `.env`, already gitignored) from your Cloudinary
-dashboard before uploads will work — without them the form still accepts
-submissions but the upload will fail:
+Purchase request reference images and supplier quote PDFs are uploaded to
+Cloudinary. Set `CLOUDINARY_URL` (e.g. in a local `.env`, already
+gitignored) to the "API environment variable" from your Cloudinary
+dashboard before uploads will work — without it the rest of the app runs,
+but any upload fails:
 
 ```
-CLOUDINARY_CLOUD_NAME=your-cloud-name
-CLOUDINARY_API_KEY=your-api-key
-CLOUDINARY_API_SECRET=your-api-secret
+CLOUDINARY_URL=cloudinary://<api_key>:<api_secret>@<cloud_name>
 ```
 
 Submitting a purchase request emails the requester (confirmation + status
@@ -78,7 +77,7 @@ The repo has a `render.yaml` Blueprint (Postgres + a Python web service).
    new Postgres instance. Everything else with `sync: false` in
    `render.yaml` has no safe default — set these for real in the service's
    **Environment** tab before the first deploy does anything useful:
-   - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+   - `CLOUDINARY_URL`
    - `MAILCHIMP_API_KEY`, `DEFAULT_FROM_EMAIL` (a verified sending domain in
      Mailchimp Transactional)
 3. First deploy runs migrations as part of the build (see `buildCommand` in

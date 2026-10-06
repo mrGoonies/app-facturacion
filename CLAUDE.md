@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Internal Django 6.1 tool for Irritec that tracks the KPIs behind an administrative assistant's monthly bonus. It covers two flows: **purchasing** (request → quotes → PO) and **invoicing** (logistics hand-off of picking lists → in process → invoiced, plus billing errors). It has one app, `tracker`, and `config` is the project package. All user-facing text (labels, choices, messages, emails) is in **Spanish** (`LANGUAGE_CODE='es-cl'`, `TIME_ZONE='America/Santiago'`). Code, comments and docstrings are in English.
+Internal Django 6.1 tool for Irritec that tracks the KPIs behind an administrative assistant's monthly bonus. It covers two flows: **purchasing** (request → quotes → requester confirms → PO) and **invoicing** (logistics hand-off of picking lists → in process → invoiced, plus billing errors). It has one app, `tracker`, and `config` is the project package. All user-facing text (labels, choices, messages, emails) is in **Spanish** (`LANGUAGE_CODE='es-cl'`, `TIME_ZONE='America/Santiago'`). Code, comments and docstrings are in English.
 
 ## Commands
 
@@ -13,40 +13,53 @@ Python 3.14 is managed with `uv`. Local development uses SQLite (`db.sqlite3` at
 ```bash
 uv sync
 uv run python manage.py migrate
+uv run python manage.py createsuperuser      # staff login for /panel/
 uv run python manage.py runserver            # / = public landing, /panel/ = assistant workspace
 uv run python manage.py makemigrations tracker
-uv run python manage.py test                 # all tests (tracker/tests.py is currently empty)
-uv run python manage.py test tracker.tests.SomeTestCase.test_method   # single test
+uv run python manage.py test tracker         # all tests (tracker/tests.py)
+uv run python manage.py test tracker.tests.OutcomeTests.test_untouched_list_past_target_is_late   # single test
+uv run ruff format .                         # formatter (default config, no [tool.ruff] section)
+uv run ruff check .
 ```
 
-No linter or formatter is configured.
+Tests that render templates must use the `PLAIN_STATIC` `override_settings` decorator in `tracker/tests.py`. Production's `CompressedManifestStaticFilesStorage` fails without a prior `collectstatic`.
 
-Settings come from env vars through `python-decouple` (a local `.env` is gitignored). Setting `DATABASE_URL` switches the app from SQLite to that database. Deployment is defined in `render.yaml`. Its build command runs `collectstatic` and `migrate`.
+Settings come from env vars through `python-decouple` (a local `.env` is gitignored). Setting `DATABASE_URL` switches the app from SQLite to that database. Deployment is defined in `render.yaml` (Blueprint: Postgres + web service). Its build command runs `collectstatic` and `migrate`. `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` and `SITE_URL` pick up `RENDER_EXTERNAL_HOSTNAME` automatically.
 
 ## Architecture
 
 **Two access tiers, one URL namespace (`tracker:`)**
-- Public, no login: `solicitudes/nueva/` creates a purchase request. `solicitudes/<uuid:token>/` is the requester's status page, reachable only through the unguessable `PurchaseRequest.token`. `logistica/entrega/` is the logistics hand-off form.
+- Public, no login: `solicitudes/nueva/` creates a purchase request. `solicitudes/<uuid:token>/` is the requester's status page, reachable only through the unguessable `PurchaseRequest.token`. The requester also picks a quote there (`action=confirm_quote`, which sets `confirmed_at`). `logistica/entrega/` is the logistics hand-off form.
 - Staff, `@login_required`: everything under `panel/`. That covers the unified queue, purchase detail, picking list detail and KPI scorecard.
 
-**State machines live in views as POST `action=` dispatch.** `purchase_detail` and `picking_list_detail` in `tracker/views.py` each handle one form POST with a hidden `action` field. The actions are `add_quote`, `select_quote`, `send_quotes_to_requester`, `issue_po`, `close_request`, `cancel_request`, and `mark_in_process`, `issue_invoice`, `report_error`, `correct_error`, `dispute_error`. Each action sets the status and timestamp fields and then redirects. Status changes on a purchase request also append a `PurchaseActivity` row, which is the timeline shown on both the staff and public pages. When you add a transition, keep the timestamps and the activity log consistent. The KPIs are computed from those timestamps.
+**State machines live in views as POST `action=` dispatch.** `request_status`, `purchase_detail` and `picking_list_detail` in `tracker/views.py` each handle one form POST with a hidden `action` field:
+- Purchase (staff): `add_quote` → `send_quotes_to_requester` (needs `KPI_SETTINGS["MIN_QUOTES"]` quotes, emails the requester) → requester's `confirm_quote` → `issue_po` (needs `AWAITING_CONFIRMATION` and `confirmed_at`) → `close_request`. `cancel_request` is allowed only before the PO.
+- Picking list: `mark_in_process`, `issue_invoice`, `report_error`, `correct_error`, `dispute_error`.
 
-**KPI timing fields matter.** Each KPI is measured between two timestamps:
-- PO KPI: `PurchaseRequest.created_at → po_issued_at`
-- Invoicing KPIs: `PickingList.handed_off_at → in_process_at` and `→ invoiced_at`
+Each action guards the current status, sets the status and timestamp fields, and redirects. Every purchase transition also appends a `PurchaseActivity` row (`pr.activities.create(...)`). That row is the timeline shown on both the staff and public pages. When you add a transition, keep the guards, timestamps and activity log consistent, because the KPIs are computed from those timestamps.
 
-Attribution is through `handled_by`. It is set to `request.user` on `issue_po`, `mark_in_process` and `issue_invoice`, and the scorecard filters by it. Elapsed time is wall-clock time, not business hours.
+**KPI timing.** Each KPI is measured between two timestamps, in wall-clock time (not business hours):
+- PO KPI: `PurchaseRequest.created_at → po_issued_at`. The target depends on `urgency` (`po_target_hours`, from `PO_TARGET_HOURS_BY_URGENCY`).
+- Invoicing KPIs: `PickingList.handed_off_at → in_process_at` and `→ invoiced_at`.
+
+The models expose two layers. `is_*_on_time` properties only judge finished work. `po_outcome()` / `in_process_outcome()` / `invoice_outcome()` return `True` (on time), `False` (late, including unfinished work past its deadline) or `None` (still pending inside the target). The scorecard uses the outcome methods so that pending items are left out and overdue untouched items count as late. Keep this contract when you add KPIs.
+
+`handled_by` is set to `request.user` on `issue_po`, `mark_in_process` and `issue_invoice`. `compute_scorecard` accepts an optional `user` filter, but the `kpi_scorecard` view calls it without one, so the scorecard counts all of the month's work.
 
 **Where KPI rules live:**
-- `config/settings.py` → `KPI_SETTINGS`: the targets (48h/2h/8h/2%), weights, bonus threshold and base bonus, all overridable with `KPI_*` env vars. Don't hardcode these numbers.
-- Model properties (`is_po_on_time`, `is_in_process_on_time`, `is_invoice_on_time`) are the single source of the "on time?" check.
-- `tracker/kpi.py` → `compute_scorecard(year, month, user)` builds the monthly scorecard live from those properties. There are no stored snapshots. Only non-disputed `BillingError`s with `attributable_to=ASSISTANT` count against the bonus.
-- The queue view (`queue`) computes a "time left" for each row against the same targets and sorts rows overdue first.
+- `config/settings.py` → `KPI_SETTINGS`: per-urgency PO targets, the in-process/invoice hour targets, error-rate target, on-time rate targets, weights, bonus threshold, attainment target and base bonus. All of them can be overridden with `KPI_*` env vars. Don't hardcode these numbers.
+- Model properties and outcome methods (above) are the single source of the "on time?" check. `tracker/kpi.py` reuses them instead of redoing the hour math.
+- `tracker/kpi.py` → `compute_scorecard(year, month, user=None)` builds the monthly scorecard live. There are no stored snapshots. Cancelled requests are excluded. Only non-disputed `BillingError`s with `attributable_to=ASSISTANT` (`counts_against_bonus`) count against the bonus.
+- The `queue` view computes a "time left" for each row against the same targets and sorts rows overdue first.
 
 **Integrations:**
-- Uploaded files go to Cloudinary through `CloudinaryField`. The default storage is `MediaCloudinaryStorage`, and supplier quote PDFs use `resource_type="raw"`. Static files go through WhiteNoise. In `INSTALLED_APPS`, `django.contrib.staticfiles` must stay *before* `cloudinary_storage` (see the comment in settings).
-- Email: `tracker/emails.py` uses plain-text `send_mail`. It uses the console backend locally and Mailchimp Transactional in production, through anymail's `mandrill` backend. Absolute links are built from `SITE_URL`. "New request" notifications go to every active `is_staff` user who has a non-blank email.
+- Uploads go to Cloudinary through `CloudinaryField`. The default storage is `MediaCloudinaryStorage`, and supplier quote PDFs use `resource_type="raw"`. Credentials come from a single `CLOUDINARY_URL` (`cloudinary://key:secret@cloud`), which `settings.py` parses into `CLOUDINARY_STORAGE`. If it's unset, uploads fail but the rest of the app runs. Static files go through WhiteNoise. In `INSTALLED_APPS`, `django.contrib.staticfiles` must stay *before* `cloudinary_storage` (see the comment in settings).
+- Email: `tracker/emails.py` sends plain-text mail with `send_mail`. Locally it uses the console backend. Production uses Mailchimp Transactional through anymail's `mandrill` backend (`MAILCHIMP_API_KEY`). Absolute links are built from `SITE_URL`. "New request" notifications go to every active `is_staff` user who has a non-blank email.
 
-**Templates/UI:** project-level `templates/` (not app dirs). `base.html` → `tracker/_app_base.html` is the staff shell: sidebar nav highlighted through the `active_nav` context var, which each panel view passes. Styling comes from `static/tracker/css/app.css`. Forms use `StyledFormMixin` (`tracker/forms.py`) to add the `.input` class automatically. Duration display filters (`hm`, `hours_only`) are in `tracker/templatetags/tracker_extras.py`. Model docstrings and comments refer to "design screen 1a–1g". Those are the original mockups the pages were built from.
+**Templates/UI:** project-level `templates/` (not app dirs). `base.html` → `tracker/_app_base.html` is the staff shell: sidebar nav highlighted through the `active_nav` context var, which each panel view passes. Styling comes from `static/tracker/css/app.css`. Forms use `StyledFormMixin` (`tracker/forms.py`) to add the `.input` class automatically. Duration display filters (`hm`, `hours_only`) are in `tracker/templatetags/tracker_extras.py`. Because of `es-cl` localization, floats render with a comma. Use `|unlocalize` when a value feeds CSS or `<input type="date">`. Model docstrings and comments refer to "design screen 1a–1g". Those are the original mockups the pages were built from.
 
 **Display refs are derived, not stored:** `PR-{2400+pk}` (`display_ref`). PO and invoice numbers are generated in the views (`PO-{2000+pk}`, `F-{20000+pk}` as the invoice fallback).
+
+## In-progress work
+
+`docs/plan-correcciones-ux.md` (Spanish) is the active fix plan from end-user testing, organized as blocks A–H with one PR per block. Its "decisiones de negocio ya tomadas" are settled, so don't relitigate them. Each fix there is expected to ship with at least one test.

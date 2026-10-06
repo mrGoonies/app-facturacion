@@ -4,9 +4,11 @@ Django settings for config project.
 
 import os
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 import dj_database_url
 from decouple import Csv, config
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -158,10 +160,23 @@ STORAGES = {
     },
 }
 
+# Cloudinary credentials come from a single CLOUDINARY_URL, as shown in the
+# Cloudinary dashboard: cloudinary://<api_key>:<api_secret>@<cloud_name>.
+# It's parsed here instead of leaving the SDK to read os.environ itself:
+# python-decouple loads .env without exporting it, and cloudinary_storage
+# calls cloudinary.config() with CLOUDINARY_STORAGE's values regardless,
+# which would clobber whatever the SDK picked up. Left unset, uploads fail
+# but the rest of the app still runs.
+_cloudinary_url = urlparse(config("CLOUDINARY_URL", default=""))
+if _cloudinary_url.geturl() and _cloudinary_url.scheme != "cloudinary":
+    raise ImproperlyConfigured(
+        "CLOUDINARY_URL must look like cloudinary://<api_key>:<api_secret>@<cloud_name>"
+    )
 CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": config("CLOUDINARY_CLOUD_NAME", default=""),
-    "API_KEY": config("CLOUDINARY_API_KEY", default=""),
-    "API_SECRET": config("CLOUDINARY_API_SECRET", default=""),
+    # From netloc rather than .hostname, which would lowercase the cloud name.
+    "CLOUD_NAME": _cloudinary_url.netloc.rpartition("@")[2],
+    "API_KEY": unquote(_cloudinary_url.username or ""),
+    "API_SECRET": unquote(_cloudinary_url.password or ""),
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

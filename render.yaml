@@ -23,11 +23,7 @@ services:
         value: "False"
       # Everything below has no safe default — set these in the Render
       # dashboard (Environment tab) rather than committing real values here.
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
+      - key: CLOUDINARY_URL
         sync: false
       - key: DJANGO_EMAIL_BACKEND
         value: anymail.backends.mandrill.EmailBackend
