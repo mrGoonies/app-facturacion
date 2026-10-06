@@ -93,9 +93,8 @@ def send_quotes_collected_email(pr):
             f"Hola {pr.requester_name},\n\n"
             f"Reunimos estas cotizaciones para tu solicitud {pr.display_ref}:\n\n"
             f"{_quotes_summary(pr)}\n\n"
-            f"Responde a este correo o contáctanos para confirmarnos cuál prefieres — "
-            f"en cuanto tengamos tu confirmación emitimos la orden de compra.\n\n"
-            f"Puedes ver el detalle completo aquí:\n{status_url}\n"
+            f"Elige tu cotización aquí — en cuanto la elijas emitimos la orden de compra:\n"
+            f"{status_url}\n"
         ),
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[pr.requester_email],

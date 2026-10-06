@@ -167,3 +167,71 @@ class PurchaseRequestFormErrorsTests(TestCase):
         resp = self._post(description="Guantes", quantity="10", unit="caja")
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(PurchaseRequest.objects.get().items.count(), 1)
+
+
+@PLAIN_STATIC
+class QuoteConfirmationTests(TestCase):
+    """The requester picks the quote on their public status page; the
+    assistant can only issue the PO after that confirmation."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.user = get_user_model().objects.create_user(
+            "asistente", password="x", is_staff=True
+        )
+        self.client.force_login(self.user)
+        self.pr = PurchaseRequest.objects.create(
+            requester_name="Pedro",
+            requester_email="pedro@example.com",
+            department="Mantención",
+            needed_by=timezone.localdate(),
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            quotes_sent_at=timezone.now(),
+        )
+        self.cheap = self.pr.quotes.create(supplier_name="Barato", total_amount=100)
+        self.pricey = self.pr.quotes.create(supplier_name="Caro", total_amount=200)
+
+    def _issue_po(self):
+        return self.client.post(
+            reverse("tracker:purchase_detail", args=[self.pr.pk]),
+            {"action": "issue_po"},
+        )
+
+    def _confirm(self, quote):
+        return self.client.post(
+            self.pr.get_status_url(),
+            {"action": "confirm_quote", "quote_id": quote.pk},
+        )
+
+    def test_panel_has_no_select_button(self):
+        resp = self.client.get(reverse("tracker:purchase_detail", args=[self.pr.pk]))
+        self.assertNotContains(resp, "select_quote")
+        self.assertNotContains(resp, "Emitir orden de compra")
+
+    def test_issue_po_requires_requester_confirmation(self):
+        self._issue_po()
+        self.pr.refresh_from_db()
+        self.assertIsNone(self.pr.po_issued_at)
+
+    def test_requester_can_confirm_quote_via_token(self):
+        self._confirm(self.cheap)
+        self.pr.refresh_from_db()
+        self.assertIsNotNone(self.pr.confirmed_at)
+        self.assertEqual(self.pr.selected_quote, self.cheap)
+
+        resp = self.client.get(reverse("tracker:purchase_detail", args=[self.pr.pk]))
+        self.assertContains(resp, "Emitir orden de compra")
+        self._issue_po()
+        self.pr.refresh_from_db()
+        self.assertEqual(self.pr.status, PurchaseRequest.Status.PO_ISSUED)
+        self.assertEqual(self.pr.handled_by, self.user)
+
+    def test_confirm_rejected_when_not_awaiting(self):
+        PurchaseRequest.objects.filter(pk=self.pr.pk).update(
+            status=PurchaseRequest.Status.QUOTING
+        )
+        self._confirm(self.cheap)
+        self.pr.refresh_from_db()
+        self.assertIsNone(self.pr.confirmed_at)
+        self.assertFalse(self.pr.quotes.filter(selected=True).exists())

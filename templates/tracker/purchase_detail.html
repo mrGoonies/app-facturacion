@@ -40,15 +40,8 @@
       <div class="card {% if quote.selected %}elev-md{% else %}elev-sm{% endif %}" style="{% if quote.selected %}border:2px solid var(--color-accent){% endif %}">
         <div style="display:flex;justify-content:space-between;align-items:baseline">
           <span class="card-title">{{ quote.supplier_name }}</span>
-          {% if quote.selected %}
-            <span class="tag" style="background:var(--color-accent);color:#fff">Seleccionada</span>
-          {% elif pr.status == 'quoting' or pr.status == 'awaiting_confirmation' %}
-            <form method="post" style="margin:0">
-              {% csrf_token %}
-              <input type="hidden" name="action" value="select_quote">
-              <input type="hidden" name="quote_id" value="{{ quote.pk }}">
-              <button class="btn btn-secondary" type="submit">Seleccionar</button>
-            </form>
+          {% if quote.selected and pr.confirmed_at %}
+            <span class="tag" style="background:var(--color-accent);color:#fff">Confirmada por {{ pr.requester_name }} · {{ pr.confirmed_at|date:"d M H:i" }}</span>
           {% endif %}
         </div>
         <div style="display:flex;gap:var(--space-8);font-size:13px;flex-wrap:wrap">
@@ -85,7 +78,7 @@
       <input type="hidden" name="action" value="send_quotes_to_requester">
       <button class="btn btn-primary btn-block" type="submit">Enviar cotizaciones a {{ pr.requester_name }} para confirmar</button>
     </form>
-    <p class="text-muted" style="font-size:12px;margin-top:4px">Le llegará un correo con proveedor, total y el PDF de cada cotización. Cuando confirme cuál prefiere, selecciónala arriba para poder emitir la OC.</p>
+    <p class="text-muted" style="font-size:12px;margin-top:4px">Le llegará un correo con proveedor, total y el PDF de cada cotización, y un link para elegir la que prefiere. Cuando la elija podrás emitir la OC.</p>
     {% endif %}
     {% endif %}
 
@@ -113,7 +106,7 @@
     </table>
     </div>
 
-    {% if pr.selected_quote and pr.status == 'awaiting_confirmation' %}
+    {% if pr.confirmed_at and pr.selected_quote and pr.status == 'awaiting_confirmation' %}
     <div style="display:flex;gap:var(--space-3);margin-top:var(--space-6);align-items:center">
       <form method="post"><input type="hidden" name="action" value="issue_po">{% csrf_token %}
         <button class="btn btn-primary" style="padding:12px 28px" type="submit">Emitir orden de compra</button>
@@ -121,7 +114,7 @@
       <span class="text-muted" style="font-size:12px">{{ pr.requester_name }} será notificado automáticamente.</span>
     </div>
     {% elif pr.status == 'awaiting_confirmation' %}
-    <p class="card-body" style="margin-top:var(--space-6)">Cotizaciones enviadas el {{ pr.quotes_sent_at|date:"d M H:i" }} — esperando que {{ pr.requester_name }} confirme cuál prefiere. Cuando lo haga, selecciona esa cotización arriba para poder emitir la OC.</p>
+    <p class="card-body" style="margin-top:var(--space-6)">Cotizaciones enviadas el {{ pr.quotes_sent_at|date:"d M H:i" }} — esperando que {{ pr.requester_name }} elija cuál prefiere desde <a href="{{ pr.get_status_url }}" target="_blank" rel="noopener">su página de seguimiento</a>. Cuando lo haga, aquí aparecerá el botón para emitir la OC.</p>
     {% elif pr.status == 'po_issued' %}
     <p class="card-body" style="margin-top:var(--space-4)"><strong>{{ pr.po_number }}</strong> emitida el {{ pr.po_issued_at|date:"d M H:i" }}.</p>
     <form method="post" style="margin-top:var(--space-3)">{% csrf_token %}<input type="hidden" name="action" value="close_request">
