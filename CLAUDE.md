@@ -29,14 +29,14 @@ Settings come from env vars through `python-decouple` (a local `.env` is gitigno
 ## Architecture
 
 **Two access tiers, one URL namespace (`tracker:`)**
-- Public, no login: `solicitudes/nueva/` creates a purchase request. `solicitudes/<uuid:token>/` is the requester's status page, reachable only through the unguessable `PurchaseRequest.token`. The requester also picks a quote there (`action=confirm_quote`, which sets `confirmed_at`). `logistica/entrega/` is the logistics hand-off form.
+- Public, no login: `solicitudes/nueva/` creates a purchase request. `solicitudes/<uuid:token>/` is the requester's status page, reachable only through the unguessable `PurchaseRequest.token`. The requester acts on their own request there: `confirm_quote` (sets `confirmed_at`), `reject_quotes` (back to `QUOTING`, reason required), `cancel_request` (before the PO only), `confirm_receipt` (`PO_ISSUED` → `CLOSED`) and `post_message`. `solicitudes/<uuid:token>/repetir/` opens the new-request form pre-filled from that request. `logistica/entrega/` is the logistics hand-off form.
 - Staff, `@login_required`: everything under `panel/`. That covers the unified queue, purchase detail, picking list detail and KPI scorecard.
 
 **State machines live in views as POST `action=` dispatch.** `request_status`, `purchase_detail` and `picking_list_detail` in `tracker/views.py` each handle one form POST with a hidden `action` field:
-- Purchase (staff): `add_quote` → `send_quotes_to_requester` (needs `KPI_SETTINGS["MIN_QUOTES"]` quotes, emails the requester) → requester's `confirm_quote` → `issue_po` (needs `AWAITING_CONFIRMATION` and `confirmed_at`) → `close_request`. `cancel_request` is allowed only before the PO.
+- Purchase (staff): `add_quote` / `delete_quote` (while quoting) → `send_quotes_to_requester` (needs `KPI_SETTINGS["MIN_QUOTES"]` quotes, emails the requester) → requester's `confirm_quote` (`remind_requester` re-sends meanwhile) → `issue_po` (needs `ready_to_issue_po`; the assistant types the real ERP PO number, optional PO PDF) → requester's `confirm_receipt`, or staff `close_request` as a fallback. `cancel_request` is allowed only before the PO (`can_cancel`). `post_message` on either side adds a message to the timeline.
 - Picking list: `mark_in_process`, `issue_invoice`, `report_error`, `correct_error`, `dispute_error`.
 
-Each action guards the current status, sets the status and timestamp fields, and redirects. Every purchase transition also appends a `PurchaseActivity` row (`pr.activities.create(...)`). That row is the timeline shown on both the staff and public pages. When you add a transition, keep the guards, timestamps and activity log consistent, because the KPIs are computed from those timestamps.
+Each action guards the current status, sets the status and timestamp fields, and redirects. Every purchase transition also appends a `PurchaseActivity` row (`pr.activities.create(...)`). That row is the timeline shown on both the staff and public pages; rows with `kind` other than `EVENT` are messages between requester and staff (`author` holds who wrote it). Every hand-over between the two sides sends an email (`tracker/emails.py`), so neither has to poll the app. When you add a transition, keep the guards, timestamps and activity log consistent, because the KPIs are computed from those timestamps.
 
 **KPI timing.** Each KPI is measured between two timestamps, in wall-clock time (not business hours):
 - PO KPI: `PurchaseRequest.created_at → po_issued_at`. The target depends on `urgency` (`po_target_hours`, from `PO_TARGET_HOURS_BY_URGENCY`).
@@ -50,7 +50,7 @@ The models expose two layers. `is_*_on_time` properties only judge finished work
 - `config/settings.py` → `KPI_SETTINGS`: per-urgency PO targets, the in-process/invoice hour targets, error-rate target, on-time rate targets, weights, bonus threshold, attainment target and base bonus. All of them can be overridden with `KPI_*` env vars. Don't hardcode these numbers.
 - Model properties and outcome methods (above) are the single source of the "on time?" check. `tracker/kpi.py` reuses them instead of redoing the hour math.
 - `tracker/kpi.py` → `compute_scorecard(year, month, user=None)` builds the monthly scorecard live. There are no stored snapshots. Cancelled requests are excluded. Only non-disputed `BillingError`s with `attributable_to=ASSISTANT` (`counts_against_bonus`) count against the bonus.
-- The `queue` view computes a "time left" for each row against the same targets and sorts rows overdue first.
+- The `queue` view computes a "time left" for each row against the same targets. Purchase rows show whose turn it is (`PurchaseRequest.staff_status_label`). Sorting: rows the assistant can act on first (not waiting on the requester or on delivery), "Línea detenida" first within those, then overdue / ready-to-issue → due soon → the rest.
 
 **Integrations:**
 - Uploads go to Cloudinary through `CloudinaryField`. The default storage is `MediaCloudinaryStorage`, and supplier quote PDFs use `resource_type="raw"`. Credentials come from a single `CLOUDINARY_URL` (`cloudinary://key:secret@cloud`), which `settings.py` parses into `CLOUDINARY_STORAGE`. If it's unset, uploads fail but the rest of the app runs. Static files go through WhiteNoise. In `INSTALLED_APPS`, `django.contrib.staticfiles` must stay *before* `cloudinary_storage` (see the comment in settings).
@@ -58,7 +58,7 @@ The models expose two layers. `is_*_on_time` properties only judge finished work
 
 **Templates/UI:** project-level `templates/` (not app dirs). `base.html` → `tracker/_app_base.html` is the staff shell: sidebar nav highlighted through the `active_nav` context var, which each panel view passes. Styling comes from `static/tracker/css/app.css`. Forms use `StyledFormMixin` (`tracker/forms.py`) to add the `.input` class automatically. Duration display filters (`hm`, `hours_only`) are in `tracker/templatetags/tracker_extras.py`. Because of `es-cl` localization, floats render with a comma. Use `|unlocalize` when a value feeds CSS or `<input type="date">`. Model docstrings and comments refer to "design screen 1a–1g". Those are the original mockups the pages were built from.
 
-**Display refs are derived, not stored:** `PR-{2400+pk}` (`display_ref`). PO and invoice numbers are generated in the views (`PO-{2000+pk}`, `F-{20000+pk}` as the invoice fallback).
+**Display refs are derived, not stored:** `PR-{2400+pk}` (`display_ref`). PO and invoice numbers are typed in by the assistant (they come from the ERP), never generated.
 
 ## In-progress work
 

@@ -14,12 +14,20 @@
   {% elif pr.status == 'quoting' %}
     <h3 style="margin:14px 0 4px">Obteniendo cotizaciones</h3>
     <p class="text-muted" style="font-size:14px">Compras está solicitando cotizaciones a proveedores.</p>
+  {% elif pr.ready_to_issue_po %}
+    <h3 style="margin:14px 0 4px">Cotización elegida</h3>
+    <p class="text-muted" style="font-size:14px">Elegiste {{ pr.selected_quote.supplier_name }}. Compras emitirá la orden de compra y te avisará por correo.</p>
   {% elif pr.status == 'awaiting_confirmation' %}
-    <h3 style="margin:14px 0 4px">Cotizaciones recibidas</h3>
+    <h3 style="margin:14px 0 4px">Elige tu cotización</h3>
     <p class="text-muted" style="font-size:14px">Elige abajo la cotización que prefieres. Emitiremos la orden de compra después de tu confirmación.</p>
   {% elif pr.status == 'po_issued' %}
     <h3 style="margin:14px 0 4px">Orden de compra emitida</h3>
-    <p class="text-muted" style="font-size:14px">{{ pr.po_number }} fue emitida con {{ pr.selected_quote.supplier_name }}.</p>
+    <p class="text-muted" style="font-size:14px">{{ pr.po_number }} fue emitida con {{ pr.selected_quote.supplier_name }}.{% if pr.po_pdf %} <a href="{{ pr.po_pdf.url }}" target="_blank" rel="noopener">Ver la OC (PDF)</a>{% endif %}</p>
+    <form method="post" style="margin-top:var(--space-3)">
+      {% csrf_token %}<input type="hidden" name="action" value="confirm_receipt">
+      <button class="btn btn-primary" type="submit">Ya recibí mis artículos</button>
+      <span class="text-muted" style="font-size:12px;margin-left:8px">Esto cierra la solicitud.</span>
+    </form>
   {% elif pr.status == 'closed' %}
     <h3 style="margin:14px 0 4px">Solicitud cerrada</h3>
     <p class="text-muted" style="font-size:14px">Esta solicitud fue entregada y cerrada.</p>
@@ -27,23 +35,8 @@
     <h3 style="margin:14px 0 4px">Solicitud cancelada</h3>
   {% endif %}
 
-  <div style="display:flex;flex-direction:column;gap:0;margin:var(--space-6) 0">
-    {% for activity in pr.activities.all %}
-    <div style="display:flex;gap:14px">
-      <div style="display:flex;flex-direction:column;align-items:center">
-        <span style="width:14px;height:14px;border-radius:999px;background:var(--color-accent)"></span>
-        {% if not forloop.last %}<span style="width:2px;flex:1;background:var(--color-accent-300)"></span>{% endif %}
-      </div>
-      <div style="padding-bottom:var(--space-4)">
-        <strong style="font-size:14px">{{ activity.message }}</strong>
-        <div class="text-muted" style="font-size:12px">{{ activity.created_at|date:"d M H:i" }}</div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-
   {% if pr.quotes.exists and pr.status != 'requested' and pr.status != 'quoting' %}
-  <div class="card" style="margin-bottom:var(--space-3)">
+  <div class="card" style="margin-top:var(--space-6)">
     <span class="card-kicker">Cotizaciones recibidas</span>
     <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:13px">
       {% for quote in pr.quotes.all %}
@@ -57,11 +50,51 @@
           {% if quote.lead_time_days %}entrega en {{ quote.lead_time_days }} días · {% endif %}
           {% if quote.quote_pdf %}<a href="{{ quote.quote_pdf.url }}" target="_blank" rel="noopener">Ver PDF</a>{% endif %}
         </div>
+        {% if pr.awaiting_requester %}<form method="post" style="margin-top:8px">{% csrf_token %}<input type="hidden" name="action" value="confirm_quote"><input type="hidden" name="quote_id" value="{{ quote.pk }}"><button class="btn btn-primary" type="submit">Elegir esta cotización</button></form>{% endif %}
       </div>
-      {% if pr.status == 'awaiting_confirmation' and not pr.confirmed_at %}<form method="post" style="margin-top:8px">{% csrf_token %}<input type="hidden" name="action" value="confirm_quote"><input type="hidden" name="quote_id" value="{{ quote.pk }}"><button class="btn btn-primary" type="submit">Elegir esta cotización</button></form>{% endif %}
       {% endfor %}
     </div>
+    {% if pr.awaiting_requester %}
+    <details class="disclosure" style="border-top:1px solid var(--color-divider);padding-top:var(--space-2)">
+      <summary>Ninguna me sirve</summary>
+      <form method="post">
+        {% csrf_token %}<input type="hidden" name="action" value="reject_quotes">
+        <label class="text-muted" for="reject-body" style="font-size:12px">¿Qué necesitas distinto? (precio, plazo, especificación…)</label>
+        <textarea class="input" id="reject-body" name="body" rows="3" maxlength="2000" required></textarea>
+        <button class="btn btn-secondary" type="submit">Pedir otras cotizaciones</button>
+      </form>
+    </details>
+    {% endif %}
   </div>
+  {% endif %}
+
+  <div style="display:flex;flex-direction:column;gap:0;margin:var(--space-6) 0">
+    {% for activity in pr.activities.all %}
+    <div style="display:flex;gap:14px">
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <span style="width:14px;height:14px;border-radius:999px;background:{% if activity.is_message %}var(--color-accent-300){% else %}var(--color-accent){% endif %};flex:none"></span>
+        {% if not forloop.last %}<span style="width:2px;flex:1;background:var(--color-accent-300)"></span>{% endif %}
+      </div>
+      <div style="padding-bottom:var(--space-4);min-width:0;flex:1">
+        {% if activity.is_message %}
+          <strong style="font-size:14px">{% if activity.kind == 'staff_message' %}{{ activity.author }} · Compras{% else %}Tú{% endif %}</strong>
+          <div class="activity-message{% if activity.kind == 'staff_message' %} activity-message--staff{% endif %}">{{ activity.message|linebreaksbr }}</div>
+        {% else %}
+          <strong style="font-size:14px">{{ activity.message }}</strong>
+        {% endif %}
+        <div class="text-muted" style="font-size:12px">{{ activity.created_at|date:"d M H:i" }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if pr.is_open %}
+  <form method="post" class="card" style="margin-bottom:var(--space-3)">
+    {% csrf_token %}<input type="hidden" name="action" value="post_message">
+    <label class="card-kicker" for="message-body">¿Una duda o un dato extra? Escribe a Compras</label>
+    <textarea class="input" id="message-body" name="body" rows="2" maxlength="2000" required></textarea>
+    <div><button class="btn btn-secondary" type="submit">Enviar mensaje</button></div>
+  </form>
   {% endif %}
 
   <div class="card">
@@ -70,13 +103,28 @@
       {% for item in pr.items.all %}
       <div style="display:flex;align-items:center;gap:8px">
         {% if item.reference_image %}<img src="{{ item.reference_image.url }}" alt="Foto de {{ item.description }}" style="width:28px;height:28px;object-fit:cover;border-radius:var(--radius-sm);flex:none">{% endif %}
-        <span>{{ item.quantity }} × {{ item.description }}</span>
+        <span>{{ item.quantity }} {{ item.unit }} × {{ item.description }}</span>
       </div>
       {% endfor %}
     </div>
     <div class="card-meta">Se necesita antes del {{ pr.needed_by|date:"d M" }} · {{ pr.get_urgency_display }}</div>
     {% if pr.reference_image %}
     <img src="{{ pr.reference_image.url }}" alt="Tu imagen de referencia" style="max-width:100%;border-radius:var(--radius-md);margin-top:var(--space-3)">
+    {% endif %}
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:flex-start;margin-top:var(--space-4);font-size:13px">
+    <a href="{% url 'tracker:purchase_request_repeat' pr.token %}">Repetir esta solicitud</a>
+    {% if pr.can_cancel %}
+    <details class="disclosure">
+      <summary>Cancelar solicitud</summary>
+      <form method="post" onsubmit="return confirm('¿Cancelar esta solicitud de compra?');">
+        {% csrf_token %}<input type="hidden" name="action" value="cancel_request">
+        <label class="text-muted" for="cancel-body" style="font-size:12px">Motivo (opcional)</label>
+        <textarea class="input" id="cancel-body" name="body" rows="2" maxlength="2000"></textarea>
+        <button class="btn btn-secondary" type="submit">Cancelar solicitud</button>
+      </form>
+    </details>
     {% endif %}
   </div>
 </div>

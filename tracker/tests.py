@@ -1,13 +1,15 @@
 from datetime import timedelta
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
+from django.core import mail
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from .forms import LogisticsHandoffForm
 from .kpi import compute_scorecard
-from .models import PickingList, PickingListBatch, PurchaseRequest
+from .models import PickingList, PickingListBatch, PurchaseActivity, PurchaseRequest
 
 
 def _make_list(number, hours_ago, **fields):
@@ -195,7 +197,7 @@ class QuoteConfirmationTests(TestCase):
     def _issue_po(self):
         return self.client.post(
             reverse("tracker:purchase_detail", args=[self.pr.pk]),
-            {"action": "issue_po"},
+            {"action": "issue_po", "po_number": "OC-4510"},
         )
 
     def _confirm(self, quote):
@@ -235,3 +237,227 @@ class QuoteConfirmationTests(TestCase):
         self.pr.refresh_from_db()
         self.assertIsNone(self.pr.confirmed_at)
         self.assertFalse(self.pr.quotes.filter(selected=True).exists())
+
+
+def _make_request(**fields):
+    defaults = {
+        "requester_name": "Pedro",
+        "requester_email": "pedro@example.com",
+        "department": "Mantención",
+        "needed_by": timezone.localdate(),
+    }
+    return PurchaseRequest.objects.create(**{**defaults, **fields})
+
+
+@PLAIN_STATIC
+class PurchaseFlowStaffTests(TestCase):
+    """The assistant's side: the queue says whose turn it is, and every
+    hand-over to the requester notifies them."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            "asistente", email="compras@example.com", password="x", is_staff=True
+        )
+        self.client.force_login(self.user)
+
+    def _post(self, pr, **data):
+        return self.client.post(reverse("tracker:purchase_detail", args=[pr.pk]), data)
+
+    def test_queue_lists_ready_to_issue_first_and_waiting_last(self):
+        waiting = _make_request(
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            quotes_sent_at=timezone.now(),
+        )
+        _make_request()
+        ready = _make_request(
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            confirmed_at=timezone.now(),
+        )
+        issued = _make_request(status=PurchaseRequest.Status.PO_ISSUED)
+        resp = self.client.get(reverse("tracker:queue") + "?view=purchases")
+        refs = [row.ref for row in resp.context["rows"]]
+        self.assertEqual(refs[0], ready.display_ref)
+        self.assertEqual(set(refs[-2:]), {waiting.display_ref, issued.display_ref})
+        self.assertContains(resp, "Lista para emitir OC")
+        self.assertContains(resp, "Esperando al solicitante")
+        self.assertContains(resp, "Esperando recepción")
+        self.assertEqual(resp.context["stats"]["ready_to_issue"], 1)
+
+    def test_line_stopped_leads_actionable_rows(self):
+        _make_request()
+        stopped = _make_request(urgency=PurchaseRequest.Urgency.LINE_STOPPED)
+        resp = self.client.get(reverse("tracker:queue"))
+        self.assertEqual(resp.context["rows"][0].ref, stopped.display_ref)
+
+    def test_invalid_quote_rerenders_with_errors(self):
+        pr = _make_request()
+        resp = self._post(pr, action="add_quote", supplier_name="", currency="CLP")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Este campo es obligatorio.")
+        self.assertFalse(pr.quotes.exists())
+
+    def test_delete_last_quote_returns_to_requested(self):
+        pr = _make_request(status=PurchaseRequest.Status.QUOTING)
+        quote = pr.quotes.create(supplier_name="Errado")
+        self._post(pr, action="delete_quote", quote_id=quote.pk)
+        pr.refresh_from_db()
+        self.assertFalse(pr.quotes.exists())
+        self.assertEqual(pr.status, PurchaseRequest.Status.REQUESTED)
+
+    def test_cannot_delete_quote_once_sent(self):
+        pr = _make_request(status=PurchaseRequest.Status.AWAITING_CONFIRMATION)
+        quote = pr.quotes.create(supplier_name="Enviada")
+        self._post(pr, action="delete_quote", quote_id=quote.pk)
+        self.assertTrue(pr.quotes.filter(pk=quote.pk).exists())
+
+    def test_remind_requester_resends_quotes(self):
+        pr = _make_request(status=PurchaseRequest.Status.AWAITING_CONFIRMATION)
+        self._post(pr, action="remind_requester")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["pedro@example.com"])
+        self.assertIn("Recordatorio", mail.outbox[0].subject)
+
+    def test_issue_po_requires_real_number_and_notifies_requester(self):
+        pr = _make_request(
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            confirmed_at=timezone.now(),
+        )
+        pr.quotes.create(supplier_name="Barato", selected=True)
+
+        resp = self._post(pr, action="issue_po", po_number="")
+        self.assertEqual(resp.status_code, 200)
+        pr.refresh_from_db()
+        self.assertIsNone(pr.po_issued_at)
+
+        self._post(pr, action="issue_po", po_number="OC-4510")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.PO_ISSUED)
+        self.assertEqual(pr.po_number, "OC-4510")
+        self.assertEqual(mail.outbox[-1].to, ["pedro@example.com"])
+        self.assertIn("OC-4510", mail.outbox[-1].body)
+
+    def test_close_only_after_po_and_notifies_requester(self):
+        pr = _make_request(status=PurchaseRequest.Status.QUOTING)
+        self._post(pr, action="close_request")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.QUOTING)
+
+        PurchaseRequest.objects.filter(pk=pr.pk).update(
+            status=PurchaseRequest.Status.PO_ISSUED
+        )
+        self._post(pr, action="close_request")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.CLOSED)
+        self.assertEqual(mail.outbox[-1].to, ["pedro@example.com"])
+
+    def test_staff_cancel_notifies_requester(self):
+        pr = _make_request()
+        self._post(pr, action="cancel_request")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.CANCELLED)
+        self.assertEqual(mail.outbox[-1].to, ["pedro@example.com"])
+
+    def test_staff_message_reaches_requester(self):
+        pr = _make_request()
+        self._post(pr, action="post_message", body="¿Qué talla de guantes?")
+        activity = pr.activities.get()
+        self.assertEqual(activity.kind, PurchaseActivity.Kind.STAFF_MESSAGE)
+        self.assertEqual(mail.outbox[-1].to, ["pedro@example.com"])
+        self.assertIn("¿Qué talla de guantes?", mail.outbox[-1].body)
+
+
+@PLAIN_STATIC
+class PurchaseFlowRequesterTests(TestCase):
+    """The requester's side: they act on their own request from the status
+    page, and each action lands with the assistant by email."""
+
+    def setUp(self):
+        get_user_model().objects.create_user(
+            "asistente", email="compras@example.com", password="x", is_staff=True
+        )
+
+    def _post(self, pr, **data):
+        return self.client.post(pr.get_status_url(), data)
+
+    def test_confirming_quote_notifies_staff(self):
+        pr = _make_request(status=PurchaseRequest.Status.AWAITING_CONFIRMATION)
+        quote = pr.quotes.create(supplier_name="Barato")
+        self._post(pr, action="confirm_quote", quote_id=quote.pk)
+        self.assertEqual(mail.outbox[-1].to, ["compras@example.com"])
+        self.assertIn("lista para emitir OC", mail.outbox[-1].subject)
+
+    def test_reject_quotes_needs_reason_and_reopens_quoting(self):
+        pr = _make_request(status=PurchaseRequest.Status.AWAITING_CONFIRMATION)
+        pr.quotes.create(supplier_name="Caro")
+
+        self._post(pr, action="reject_quotes", body="")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.AWAITING_CONFIRMATION)
+
+        self._post(pr, action="reject_quotes", body="Muy caras")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.QUOTING)
+        self.assertTrue(
+            pr.activities.filter(
+                kind=PurchaseActivity.Kind.REQUESTER_MESSAGE, message="Muy caras"
+            ).exists()
+        )
+        self.assertEqual(mail.outbox[-1].to, ["compras@example.com"])
+
+    def test_requester_can_cancel_before_po_only(self):
+        pr = _make_request(status=PurchaseRequest.Status.QUOTING)
+        self._post(pr, action="cancel_request", body="Ya no se necesita")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.CANCELLED)
+        self.assertEqual(mail.outbox[-1].to, ["compras@example.com"])
+
+        issued = _make_request(status=PurchaseRequest.Status.PO_ISSUED)
+        self._post(issued, action="cancel_request")
+        issued.refresh_from_db()
+        self.assertEqual(issued.status, PurchaseRequest.Status.PO_ISSUED)
+
+    def test_confirm_receipt_closes_request(self):
+        pr = _make_request(status=PurchaseRequest.Status.PO_ISSUED)
+        self._post(pr, action="confirm_receipt")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.CLOSED)
+        self.assertIsNotNone(pr.closed_at)
+
+    def test_confirm_receipt_rejected_before_po(self):
+        pr = _make_request(status=PurchaseRequest.Status.QUOTING)
+        self._post(pr, action="confirm_receipt")
+        pr.refresh_from_db()
+        self.assertEqual(pr.status, PurchaseRequest.Status.QUOTING)
+
+    def test_requester_message_reaches_staff(self):
+        pr = _make_request()
+        self._post(pr, action="post_message", body="Sirve cualquier marca")
+        self.assertEqual(
+            pr.activities.get().kind, PurchaseActivity.Kind.REQUESTER_MESSAGE
+        )
+        self.assertEqual(mail.outbox[-1].to, ["compras@example.com"])
+
+    def test_status_page_shows_message_thread(self):
+        pr = _make_request()
+        pr.activities.create(
+            kind=PurchaseActivity.Kind.STAFF_MESSAGE,
+            author="Ana",
+            message="¿Qué talla?",
+        )
+        resp = self.client.get(pr.get_status_url())
+        self.assertContains(resp, "Ana · Compras")
+        self.assertContains(resp, "¿Qué talla?")
+        self.assertContains(resp, "Repetir esta solicitud")
+
+    def test_repeat_prefills_items_and_requester(self):
+        pr = _make_request(justification="Reposición mensual")
+        pr.items.create(description="Guantes de nitrilo", quantity=10, unit="caja")
+        pr.items.create(description="Lentes", quantity=5, unit="Par")
+        resp = self.client.get(
+            reverse("tracker:purchase_request_repeat", args=[pr.token])
+        )
+        self.assertContains(resp, 'value="pedro@example.com"')
+        self.assertContains(resp, 'value="Guantes de nitrilo"')
+        self.assertContains(resp, 'value="Lentes"')
+        # A non-standard unit comes back through "Otro" instead of being lost.
+        self.assertContains(resp, 'value="Par"')

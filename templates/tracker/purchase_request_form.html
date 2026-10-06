@@ -9,8 +9,11 @@
   </div>
   <h2 style="margin:12px 0 6px">¿Qué necesitas que compremos?</h2>
   <p class="text-muted" style="max-width:52ch;font-size:14px">Describe los artículos. Compras solicitará al menos dos cotizaciones de proveedores y volverá contigo con una orden de compra. Recibirás un correo en cada paso — no necesitas cuenta.</p>
+  {% if source %}
+  <div class="card" style="background:var(--color-accent-100);border-color:var(--color-accent-300);font-size:13px">Copiamos los datos y artículos de {{ source.display_ref }}. Revisa las cantidades y la fecha antes de enviar.</div>
+  {% endif %}
 
-  <form method="post" enctype="multipart/form-data" novalidate>
+  <form method="post" enctype="multipart/form-data" novalidate id="purchase-request-form">
     {% csrf_token %}
     <div class="form-row-2" style="margin-top:var(--space-6)">
       <div class="field"><label>Tu nombre</label>{{ form.requester_name }}{% include "tracker/_errors.html" with errors=form.requester_name.errors %}</div>
@@ -84,5 +87,28 @@ document.querySelectorAll('select[name$="-unit"]').forEach(function (select) {
   select.addEventListener('change', sync);
   sync();
 });
+
+// Remember who's asking so the next request starts with name, email and
+// department filled in. Storage can be unavailable (private mode, blocked
+// site data) — the form then simply starts empty.
+(function () {
+  var form = document.getElementById('purchase-request-form');
+  var KEY = 'irritec.requester';
+  var FIELDS = ['requester_name', 'requester_email', 'department'];
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+    FIELDS.forEach(function (name) {
+      var el = form.elements[name];
+      if (el && !el.value && saved[name]) el.value = saved[name];
+    });
+  } catch (e) {}
+  form.addEventListener('submit', function () {
+    try {
+      var data = {};
+      FIELDS.forEach(function (name) { data[name] = form.elements[name].value; });
+      localStorage.setItem(KEY, JSON.stringify(data));
+    } catch (e) {}
+  });
+})();
 </script>
 {% endblock %}

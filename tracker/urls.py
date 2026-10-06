@@ -15,6 +15,11 @@ urlpatterns = [
     ),
     path("solicitudes/<uuid:token>/", views.request_status, name="request_status"),
     path(
+        "solicitudes/<uuid:token>/repetir/",
+        views.purchase_request_create,
+        name="purchase_request_repeat",
+    ),
+    path(
         "logistica/entrega/", views.logistics_handoff_create, name="logistics_handoff"
     ),
     path("panel/", views.queue, name="queue"),

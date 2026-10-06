@@ -10,10 +10,20 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 
-from .emails import send_purchase_request_created_emails, send_quotes_collected_email
+from .emails import (
+    send_new_message_email,
+    send_po_issued_email,
+    send_purchase_request_created_emails,
+    send_quote_confirmed_email,
+    send_quotes_collected_email,
+    send_quotes_rejected_email,
+    send_request_cancelled_email,
+    send_request_closed_email,
+)
 from .forms import (
     BillingErrorForm,
     BrandedAuthenticationForm,
+    IssuePOForm,
     LogisticsHandoffForm,
     PurchaseRequestForm,
     PurchaseRequestItemFormSet,
@@ -24,9 +34,14 @@ from .models import (
     BillingError,
     PickingList,
     PickingListBatch,
+    PurchaseActivity,
     PurchaseRequest,
     SupplierQuote,
 )
+
+# Timeline messages are plain text; cap them so one paste can't flood the
+# timeline or the notification email.
+MESSAGE_MAX_LENGTH = 2000
 
 
 class BrandedLoginView(LoginView):
@@ -37,7 +52,11 @@ class BrandedLoginView(LoginView):
 # ---------------------------------------------------------------- public ---
 
 
-def purchase_request_create(request):
+def purchase_request_create(request, token=None):
+    """New purchase request form. Reached through `token` ("Repetir esta
+    solicitud" on the status page), it starts pre-filled with that earlier
+    request so recurring purchases don't have to be typed again."""
+    source = get_object_or_404(PurchaseRequest, token=token) if token else None
     if request.method == "POST":
         form = PurchaseRequestForm(request.POST, request.FILES)
         formset = PurchaseRequestItemFormSet(request.POST, request.FILES)
@@ -48,31 +67,137 @@ def purchase_request_create(request):
             pr.activities.create(message="Solicitud recibida")
             send_purchase_request_created_emails(pr)
             return redirect(pr.get_status_url())
+    elif source:
+        form = PurchaseRequestForm(
+            initial={
+                "requester_name": source.requester_name,
+                "requester_email": source.requester_email,
+                "department": source.department,
+                "justification": source.justification,
+                "urgency": source.urgency,
+            }
+        )
+        items = [
+            {"description": i.description, "quantity": i.quantity, "unit": i.unit}
+            for i in source.items.all()
+        ]
+        formset = PurchaseRequestItemFormSet(initial=items)
+        # Enough extra rows for every copied item, plus one blank.
+        formset.extra = max(formset.extra, len(items))
     else:
         form = PurchaseRequestForm()
         formset = PurchaseRequestItemFormSet()
     return render(
         request,
         "tracker/purchase_request_form.html",
-        {"form": form, "formset": formset},
+        {"form": form, "formset": formset, "source": source},
     )
 
 
+def _message_body(request):
+    return request.POST.get("body", "").strip()[:MESSAGE_MAX_LENGTH]
+
+
 def request_status(request, token):
+    """The requester's page. Besides showing progress, it lets them act on
+    their own request without going through the assistant: pick a quote or
+    ask for others, cancel before the PO, confirm receipt, and write to
+    purchasing."""
     pr = get_object_or_404(PurchaseRequest, token=token)
-    if request.method == "POST" and request.POST.get("action") == "confirm_quote":
-        if pr.status != PurchaseRequest.Status.AWAITING_CONFIRMATION or pr.confirmed_at:
+    if request.method != "POST":
+        return render(request, "tracker/request_status.html", {"pr": pr})
+
+    action = request.POST.get("action")
+    if action == "confirm_quote":
+        if not pr.awaiting_requester:
             messages.error(request, "Esta solicitud ya no acepta confirmaciones.")
         else:
-            quote = get_object_or_404(SupplierQuote, pk=request.POST.get("quote_id"), request=pr)
+            quote = get_object_or_404(
+                SupplierQuote, pk=request.POST.get("quote_id"), request=pr
+            )
             pr.quotes.update(selected=False)
             quote.selected = True
             quote.save(update_fields=["selected"])
             pr.confirmed_at = timezone.now()
             pr.save(update_fields=["confirmed_at"])
-            pr.activities.create(message=f"{pr.requester_name} eligió la cotización de {quote.supplier_name}")
-        return redirect(pr.get_status_url())
-    return render(request, "tracker/request_status.html", {"pr": pr})
+            pr.activities.create(
+                message=f"{pr.requester_name} eligió la cotización de {quote.supplier_name}"
+            )
+            send_quote_confirmed_email(pr)
+            messages.success(
+                request, "Listo. Compras emitirá la orden de compra con esa cotización."
+            )
+    elif action == "reject_quotes":
+        reason = _message_body(request)
+        if not pr.awaiting_requester:
+            messages.error(
+                request, "Esta solicitud ya no acepta cambios de cotización."
+            )
+        elif not reason:
+            messages.error(
+                request, "Cuéntanos por qué no te sirven para buscar mejores."
+            )
+        else:
+            pr.status = PurchaseRequest.Status.QUOTING
+            pr.save(update_fields=["status"])
+            pr.activities.create(
+                message=f"{pr.requester_name} pidió otras cotizaciones"
+            )
+            pr.activities.create(
+                kind=PurchaseActivity.Kind.REQUESTER_MESSAGE,
+                author=pr.requester_name,
+                message=reason,
+            )
+            send_quotes_rejected_email(pr, reason)
+            messages.success(
+                request, "Le avisamos a Compras que busque otras cotizaciones."
+            )
+    elif action == "cancel_request":
+        reason = _message_body(request)
+        if not pr.can_cancel:
+            messages.error(
+                request,
+                "Ya se emitió la orden de compra; escríbele a Compras para cancelarla.",
+            )
+        else:
+            pr.status = PurchaseRequest.Status.CANCELLED
+            pr.closed_at = timezone.now()
+            pr.save(update_fields=["status", "closed_at"])
+            pr.activities.create(message=f"Cancelada por {pr.requester_name}")
+            if reason:
+                pr.activities.create(
+                    kind=PurchaseActivity.Kind.REQUESTER_MESSAGE,
+                    author=pr.requester_name,
+                    message=reason,
+                )
+            send_request_cancelled_email(pr, by_requester=True, reason=reason)
+            messages.success(request, "Cancelaste la solicitud.")
+    elif action == "confirm_receipt":
+        if pr.status != PurchaseRequest.Status.PO_ISSUED:
+            messages.error(request, "Esta solicitud no está esperando recepción.")
+        else:
+            pr.status = PurchaseRequest.Status.CLOSED
+            pr.closed_at = timezone.now()
+            pr.save(update_fields=["status", "closed_at"])
+            pr.activities.create(
+                message=f"{pr.requester_name} confirmó que recibió los artículos"
+            )
+            messages.success(request, "Gracias. La solicitud quedó cerrada.")
+    elif action == "post_message":
+        body = _message_body(request)
+        if not pr.is_open:
+            messages.error(request, "Esta solicitud ya está cerrada.")
+        elif not body:
+            messages.error(request, "Escribe un mensaje antes de enviarlo.")
+        else:
+            activity = pr.activities.create(
+                kind=PurchaseActivity.Kind.REQUESTER_MESSAGE,
+                author=pr.requester_name,
+                message=body,
+            )
+            send_new_message_email(pr, activity)
+            messages.success(request, "Mensaje enviado a Compras.")
+    return redirect(pr.get_status_url())
 
 
 def logistics_handoff_create(request):
@@ -83,7 +208,9 @@ def logistics_handoff_create(request):
                 batch = form.save()
                 now = timezone.now()
                 for number in form.cleaned_data["list_numbers"]:
-                    PickingList.objects.create(number=number, batch=batch, handed_off_at=now)
+                    PickingList.objects.create(
+                        number=number, batch=batch, handed_off_at=now
+                    )
             messages.success(
                 request,
                 f"Se entregaron {len(form.cleaned_data['list_numbers'])} listas.",
@@ -117,6 +244,11 @@ class QueueRow:
     status_label: str
     status_class: str
     url: str
+    # Rows waiting on someone else (the requester, or the supplier's
+    # delivery) sink below the ones the assistant can act on right now.
+    actionable: bool = True
+    line_stopped: bool = False
+    ready_to_issue_po: bool = False
 
 
 def _format_hm(hours):
@@ -142,11 +274,14 @@ def queue(request):
     now = timezone.now()
     view_filter = request.GET.get("view", "all")
 
+    # PO-issued requests stay listed until received, so they're followed up
+    # instead of vanishing from sight the moment the PO goes out.
     open_requests = PurchaseRequest.objects.filter(
         status__in=[
             PurchaseRequest.Status.REQUESTED,
             PurchaseRequest.Status.QUOTING,
             PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            PurchaseRequest.Status.PO_ISSUED,
         ]
     ).prefetch_related("items")
     open_lists = (
@@ -158,8 +293,21 @@ def queue(request):
 
     rows = []
     for r in open_requests:
-        remaining = r.po_target_hours - (now - r.created_at).total_seconds() / 3600
-        label, css = _time_left(remaining)
+        if r.status == PurchaseRequest.Status.PO_ISSUED:
+            label, css = "—", "tag-neutral"
+        else:
+            remaining = r.po_target_hours - (now - r.created_at).total_seconds() / 3600
+            label, css = _time_left(remaining)
+        status_label = r.staff_status_label
+        if r.awaiting_requester and r.quotes_sent_at:
+            waited = (now - r.quotes_sent_at).total_seconds() / 3600
+            status_label += f" · hace {_format_hm(waited)}"
+        if r.ready_to_issue_po:
+            status_class = "tag-outline"
+        elif r.awaiting_requester or r.status == PurchaseRequest.Status.PO_ISSUED:
+            status_class = "tag-neutral"
+        else:
+            status_class = "tag-accent"
         rows.append(
             QueueRow(
                 ref=r.display_ref,
@@ -170,9 +318,14 @@ def queue(request):
                 received=r.created_at.strftime("%d %b %H:%M"),
                 time_left_label=label,
                 time_left_class=css,
-                status_label=r.get_status_display(),
-                status_class="tag-accent",
+                status_label=status_label,
+                status_class=status_class,
                 url=reverse("tracker:purchase_detail", args=[r.pk]),
+                actionable=not (
+                    r.awaiting_requester or r.status == PurchaseRequest.Status.PO_ISSUED
+                ),
+                line_stopped=r.urgency == PurchaseRequest.Urgency.LINE_STOPPED,
+                ready_to_issue_po=r.ready_to_issue_po,
             )
         )
 
@@ -210,9 +363,16 @@ def queue(request):
         )
 
     def sort_key(row):
-        return {"tag-overdue": 0, "tag-error": 0, "tag-due-soon": 1}.get(
-            row.time_left_class, 2
-        )
+        # Actionable first; within that "Línea detenida" leads, then
+        # overdue → due soon → the rest. A confirmed request ready for its
+        # PO is one click from done, so it ranks with the overdue ones.
+        if row.ready_to_issue_po:
+            urgency = 0
+        else:
+            urgency = {"tag-overdue": 0, "tag-error": 0, "tag-due-soon": 1}.get(
+                row.time_left_class, 2
+            )
+        return (not row.actionable, not row.line_stopped, urgency)
 
     rows.sort(key=sort_key)
 
@@ -225,8 +385,9 @@ def queue(request):
         "awaiting_quotes": open_requests.filter(
             status=PurchaseRequest.Status.REQUESTED
         ).count(),
-        "ready_to_issue": SupplierQuote.objects.filter(
-            selected=True, request__status=PurchaseRequest.Status.AWAITING_CONFIRMATION
+        "ready_to_issue": open_requests.filter(
+            status=PurchaseRequest.Status.AWAITING_CONFIRMATION,
+            confirmed_at__isnull=False,
         ).count(),
         "lists_to_invoice": open_lists.exclude(status=PickingList.Status.ERROR).count(),
         "errors_to_correct": BillingError.objects.filter(
@@ -250,82 +411,143 @@ def queue(request):
     )
 
 
+def _render_purchase_detail(request, pr, quote_form=None, po_form=None):
+    return render(
+        request,
+        "tracker/purchase_detail.html",
+        {
+            "pr": pr,
+            "quote_form": quote_form or SupplierQuoteForm(),
+            "po_form": po_form or IssuePOForm(),
+            "active_nav": "purchasing",
+        },
+    )
+
+
 @login_required
 def purchase_detail(request, pk):
     pr = get_object_or_404(PurchaseRequest, pk=pk)
+    if request.method != "POST":
+        return _render_purchase_detail(request, pr)
 
-    if request.method == "POST":
-        action = request.POST.get("action")
-        if action == "add_quote":
-            quote_form = SupplierQuoteForm(request.POST, request.FILES)
-            if quote_form.is_valid():
-                quote = quote_form.save(commit=False)
-                quote.request = pr
-                quote.save()
-                pr.status = PurchaseRequest.Status.QUOTING
+    action = request.POST.get("action")
+    if action == "add_quote":
+        quote_form = SupplierQuoteForm(request.POST, request.FILES)
+        if not quote_form.is_valid():
+            # Re-render instead of redirecting so nothing typed is lost and
+            # each error shows next to its field.
+            messages.error(request, "Revisa la cotización: hay campos con errores.")
+            return _render_purchase_detail(request, pr, quote_form=quote_form)
+        quote = quote_form.save(commit=False)
+        quote.request = pr
+        quote.save()
+        pr.status = PurchaseRequest.Status.QUOTING
+        pr.save()
+        pr.activities.create(message=f"Cotización recibida de {quote.supplier_name}")
+        messages.success(request, f"Cotización de {quote.supplier_name} agregada.")
+    elif action == "delete_quote":
+        quote = get_object_or_404(
+            SupplierQuote, pk=request.POST.get("quote_id"), request=pr
+        )
+        if pr.status not in (
+            PurchaseRequest.Status.REQUESTED,
+            PurchaseRequest.Status.QUOTING,
+        ):
+            messages.error(
+                request, "Solo puedes eliminar cotizaciones antes de enviarlas."
+            )
+        else:
+            quote.delete()
+            if not pr.quotes.exists():
+                pr.status = PurchaseRequest.Status.REQUESTED
                 pr.save()
-                pr.activities.create(
-                    message=f"Cotización recibida de {quote.supplier_name}"
-                )
-            else:
-                messages.error(
-                    request,
-                    "Revisa la cotización — falta adjuntar el PDF o algún dato no es válido.",
-                )
-        elif action == "send_quotes_to_requester":
-            if pr.quotes.count() < settings.KPI_SETTINGS["MIN_QUOTES"]:
-                messages.error(
-                    request,
-                    f"Agrega al menos {settings.KPI_SETTINGS['MIN_QUOTES']} cotizaciones antes de enviarlas.",
-                )
-            else:
-                send_quotes_collected_email(pr)
-                pr.status = PurchaseRequest.Status.AWAITING_CONFIRMATION
-                pr.quotes_sent_at = timezone.now()
-                pr.save()
-                pr.activities.create(
-                    message=f"Cotizaciones enviadas a {pr.requester_name} para confirmación"
-                )
-        elif action == "issue_po":
-            selected = pr.quotes.filter(selected=True).first()
-            if pr.status != PurchaseRequest.Status.AWAITING_CONFIRMATION:
-                messages.error(
-                    request,
-                    "Envía las cotizaciones al solicitante y espera su confirmación antes de emitir la orden de compra.",
-                )
-            elif not pr.confirmed_at or not selected:
-                messages.error(
-                    request,
-                    "Selecciona una cotización antes de emitir la orden de compra.",
-                )
-            else:
-                pr.status = PurchaseRequest.Status.PO_ISSUED
-                pr.po_issued_at = timezone.now()
-                pr.po_number = f"PO-{2000 + pr.pk}"
-                pr.handled_by = request.user
-                pr.save()
-                pr.activities.create(message=f"Orden de compra {pr.po_number} emitida")
-        elif action == "close_request":
+            pr.activities.create(
+                message=f"Cotización de {quote.supplier_name} eliminada"
+            )
+            messages.success(request, f"Cotización de {quote.supplier_name} eliminada.")
+    elif action == "send_quotes_to_requester":
+        if pr.status != PurchaseRequest.Status.QUOTING:
+            messages.error(request, "Esta solicitud no está en etapa de cotización.")
+        elif pr.quotes.count() < settings.KPI_SETTINGS["MIN_QUOTES"]:
+            messages.error(
+                request,
+                f"Agrega al menos {settings.KPI_SETTINGS['MIN_QUOTES']} cotizaciones antes de enviarlas.",
+            )
+        else:
+            pr.quotes.update(selected=False)
+            pr.status = PurchaseRequest.Status.AWAITING_CONFIRMATION
+            pr.quotes_sent_at = timezone.now()
+            pr.save()
+            send_quotes_collected_email(pr)
+            pr.activities.create(
+                message=f"Cotizaciones enviadas a {pr.requester_name} para confirmación"
+            )
+            messages.success(request, f"Cotizaciones enviadas a {pr.requester_name}.")
+    elif action == "remind_requester":
+        if not pr.awaiting_requester:
+            messages.error(request, "Esta solicitud no está esperando al solicitante.")
+        else:
+            send_quotes_collected_email(pr, reminder=True)
+            pr.activities.create(message=f"Recordatorio enviado a {pr.requester_name}")
+            messages.success(request, f"Recordatorio enviado a {pr.requester_name}.")
+    elif action == "issue_po":
+        if not pr.ready_to_issue_po or not pr.selected_quote:
+            messages.error(
+                request,
+                "Envía las cotizaciones al solicitante y espera que elija una antes de emitir la orden de compra.",
+            )
+        else:
+            po_form = IssuePOForm(request.POST, request.FILES, instance=pr)
+            if not po_form.is_valid():
+                return _render_purchase_detail(request, pr, po_form=po_form)
+            pr = po_form.save(commit=False)
+            pr.status = PurchaseRequest.Status.PO_ISSUED
+            pr.po_issued_at = timezone.now()
+            pr.handled_by = request.user
+            pr.save()
+            pr.activities.create(message=f"Orden de compra {pr.po_number} emitida")
+            send_po_issued_email(pr)
+            messages.success(
+                request,
+                f"OC {pr.po_number} emitida. Le avisamos a {pr.requester_name}.",
+            )
+    elif action == "close_request":
+        if pr.status != PurchaseRequest.Status.PO_ISSUED:
+            messages.error(request, "Solo puedes cerrar una solicitud con OC emitida.")
+        else:
             pr.status = PurchaseRequest.Status.CLOSED
             pr.closed_at = timezone.now()
             pr.save()
             pr.activities.create(message="Solicitud cerrada")
-        elif action == "cancel_request":
-            if pr.status not in (PurchaseRequest.Status.REQUESTED, PurchaseRequest.Status.QUOTING, PurchaseRequest.Status.AWAITING_CONFIRMATION):
-                messages.error(request, "No se puede cancelar una solicitud con OC emitida.")
-                return redirect("tracker:purchase_detail", pk=pk)
+            send_request_closed_email(pr)
+            messages.success(request, "Solicitud cerrada.")
+    elif action == "cancel_request":
+        if not pr.can_cancel:
+            messages.error(
+                request, "No se puede cancelar una solicitud con OC emitida."
+            )
+        else:
             pr.status = PurchaseRequest.Status.CANCELLED
             pr.closed_at = timezone.now()
             pr.save()
             pr.activities.create(message="Solicitud cancelada")
-        return redirect("tracker:purchase_detail", pk=pk)
-
-    quote_form = SupplierQuoteForm()
-    return render(
-        request,
-        "tracker/purchase_detail.html",
-        {"pr": pr, "quote_form": quote_form, "active_nav": "purchasing"},
-    )
+            send_request_cancelled_email(pr)
+            messages.success(request, "Solicitud cancelada.")
+    elif action == "post_message":
+        body = _message_body(request)
+        if not pr.is_open:
+            messages.error(request, "Esta solicitud ya está cerrada.")
+        elif not body:
+            messages.error(request, "Escribe un mensaje antes de enviarlo.")
+        else:
+            activity = pr.activities.create(
+                kind=PurchaseActivity.Kind.STAFF_MESSAGE,
+                author=request.user.get_full_name() or request.user.get_username(),
+                message=body,
+            )
+            send_new_message_email(pr, activity)
+            messages.success(request, f"Mensaje enviado a {pr.requester_name}.")
+    return redirect("tracker:purchase_detail", pk=pk)
 
 
 @login_required
@@ -351,7 +573,9 @@ def picking_list_detail(request, number):
             pl.save()
         elif action == "report_error":
             if not pl.invoiced_at:
-                messages.error(request, "Solo puedes reportar errores en listas facturadas.")
+                messages.error(
+                    request, "Solo puedes reportar errores en listas facturadas."
+                )
                 return redirect("tracker:picking_list_detail", number=number)
             error_form = BillingErrorForm(request.POST)
             if error_form.is_valid():
@@ -395,7 +619,7 @@ def kpi_scorecard(request):
         month = int(request.GET.get("month", local_now.month))
         if not 1 <= month <= 12:
             raise ValueError
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         year, month = local_now.year, local_now.month
     card = compute_scorecard(year, month)
 

@@ -50,6 +50,14 @@ class PurchaseRequest(models.Model):
         max_length=25, choices=Status.choices, default=Status.REQUESTED
     )
     po_number = models.CharField(max_length=40, blank=True)
+    po_pdf = CloudinaryField(
+        "orden de compra",
+        resource_type="raw",
+        folder="purchase_orders",
+        blank=True,
+        null=True,
+        help_text="PDF de la orden de compra emitida (opcional).",
+    )
 
     handled_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -117,6 +125,42 @@ class PurchaseRequest(models.Model):
     @property
     def is_open(self):
         return self.status not in (self.Status.CLOSED, self.Status.CANCELLED)
+
+    @property
+    def can_cancel(self):
+        """Either side may cancel only before the PO goes out."""
+        return self.status in (
+            self.Status.REQUESTED,
+            self.Status.QUOTING,
+            self.Status.AWAITING_CONFIRMATION,
+        )
+
+    @property
+    def awaiting_requester(self):
+        """Quotes are out and the ball is in the requester's court."""
+        return (
+            self.status == self.Status.AWAITING_CONFIRMATION and not self.confirmed_at
+        )
+
+    @property
+    def ready_to_issue_po(self):
+        return self.status == self.Status.AWAITING_CONFIRMATION and bool(
+            self.confirmed_at
+        )
+
+    @property
+    def staff_status_label(self):
+        """Status as the assistant needs to read it in the queue: whose turn
+        it is, not just where the request sits in the state machine."""
+        if self.status == self.Status.REQUESTED:
+            return "Por cotizar"
+        if self.awaiting_requester:
+            return "Esperando al solicitante"
+        if self.ready_to_issue_po:
+            return "Lista para emitir OC"
+        if self.status == self.Status.PO_ISSUED:
+            return "Esperando recepción"
+        return self.get_status_display()
 
     # No "Solicitada" step here on purpose: the assistant's stepper starts
     # at "Cotizando" straight away, since a freshly-requested purchase is
@@ -211,12 +255,24 @@ class SupplierQuote(models.Model):
 
 class PurchaseActivity(models.Model):
     """Timeline entries shown on the purchase detail and requester status
-    pages (design screens 1d/1f)."""
+    pages (design screens 1d/1f).
+
+    Besides the system events logged on each transition, the timeline also
+    carries the messages the requester and the assistant write to each other,
+    so clarifications stay with the request instead of in phone calls.
+    """
+
+    class Kind(models.TextChoices):
+        EVENT = "event", "Evento"
+        REQUESTER_MESSAGE = "requester_message", "Mensaje del solicitante"
+        STAFF_MESSAGE = "staff_message", "Mensaje de Compras"
 
     request = models.ForeignKey(
         PurchaseRequest, related_name="activities", on_delete=models.CASCADE
     )
-    message = models.CharField(max_length=255)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.EVENT)
+    author = models.CharField(max_length=120, blank=True)
+    message = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -225,6 +281,10 @@ class PurchaseActivity(models.Model):
 
     def __str__(self):
         return self.message
+
+    @property
+    def is_message(self):
+        return self.kind != self.Kind.EVENT
 
 
 class PickingListBatch(models.Model):

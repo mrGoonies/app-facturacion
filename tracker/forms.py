@@ -218,6 +218,26 @@ class SupplierQuoteForm(StyledFormMixin, forms.ModelForm):
         return pdf
 
 
+class IssuePOForm(StyledFormMixin, forms.ModelForm):
+    """The PO number comes from the ERP the order was actually raised in —
+    never generated here, or it wouldn't match the real document."""
+
+    class Meta:
+        model = PurchaseRequest
+        fields = ["po_number", "po_pdf"]
+        labels = {"po_number": "Número de OC"}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["po_number"].required = True
+
+    def clean_po_pdf(self):
+        pdf = self.cleaned_data.get("po_pdf")
+        if pdf and hasattr(pdf, "name") and not pdf.name.lower().endswith(".pdf"):
+            raise forms.ValidationError("El archivo debe ser un PDF.")
+        return pdf
+
+
 class BillingErrorForm(StyledFormMixin, forms.ModelForm):
     # Redeclared explicitly: ModelForm otherwise inserts a blank "---------"
     # choice for a required CharField with no default, which showed up as a
